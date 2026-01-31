@@ -66,13 +66,16 @@ class App:
         self.show_main()
 
     def _setup_window(self):
-        """Настройка главного окна"""
+        """Настройка главного окна в классическом стиле"""
         self.root.title("SRM FMM")
+
+        # Кроссплатформенное развертывание окна
         try:
-            self.root.iconbitmap(default="obosrashka.ico")
+            self.root.state('zoomed')
         except:
-            pass  # Если иконки нет
-        self.root.state('zoomed')
+            self.root.attributes('-zoomed', True)
+
+        # Возвращаем принудительный белый фон
         self.root.configure(bg='white')
 
     def _create_menu(self):
@@ -161,13 +164,14 @@ class App:
             on_date_click_callback=self.on_date_click
         )
 
-        # Передаём ВСЕ менеджеры в ClientsView
+        # ПЕРЕДАЕМ ВСЕ МЕНЕДЖЕРЫ, включая tasks_mgr
         self.clients_view = ClientsView(
             self.content_frame,
             self.clients_mgr,
             self.contact_persons_mgr,
             self.emails_mgr,
-            self.interactions_mgr
+            self.interactions_mgr,
+            self.tasks_mgr  # ← ВОТ ЭТО КЛЮЧЕВОЕ ИЗМЕНЕНИЕ!
         )
 
         self.contracts_view = ContractsView(self.content_frame)

@@ -22,7 +22,7 @@ class ContractsManager:
     def get_all(self):
         """Получить все договора"""
         query = """
-            SELECT c.*, cl.name as client_name 
+            SELECT c.*, cl.company as client_name  # ← ИЗМЕНИТЬ 'name' на 'company'
             FROM contracts c
             LEFT JOIN clients cl ON c.client_id = cl.id
             ORDER BY c.date DESC

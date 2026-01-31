@@ -68,32 +68,6 @@ class EmailsManager:
         """
         return self.db.fetch_one(query, (client_id,))
 
-    def update(self, email_id, email, is_primary):
-        """
-        Обновить email.
-
-        Args:
-            email_id: int - ID записи email
-            email: str - новый email
-            is_primary: bool - основной?
-        """
-        # Получаем client_id
-        email_record = self.db.fetch_one("SELECT client_id FROM client_emails WHERE id = ?", (email_id,))
-
-        if email_record and is_primary:
-            # Снимаем флаг с других email этого клиента
-            self.db.execute(
-                "UPDATE client_emails SET is_primary = 0 WHERE client_id = ? AND id != ?",
-                (email_record['client_id'], email_id)
-            )
-
-        query = """
-            UPDATE client_emails 
-            SET email = ?, is_primary = ?
-            WHERE id = ?
-        """
-        self.db.execute(query, (email, int(is_primary), email_id))
-
     def delete(self, email_id):
         """
         Удалить email.

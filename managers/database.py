@@ -153,29 +153,31 @@ class Database:
             pass  # Колонка уже существует, всё в порядке
         # ---------------------
 
+        # ============================================
+        # ИНДЕКСЫ ДЛЯ УСКОРЕНИЯ ПОИСКА
+        # ============================================
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_company ON clients(company)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_search ON clients(company, address)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_due_date ON tasks(due_date)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_contracts_client ON contracts(client_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_contact_persons_client ON contact_persons(client_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_interactions_client ON interaction_history(client_id)")
+
         self._connection.commit()
         print("✓ Таблицы созданы/проверены")
 
     def execute(self, query, params=()):
-        """
-        Выполнить SQL-запрос (INSERT, UPDATE, DELETE).
-
-        Args:
-            query: str - SQL запрос
-            params: tuple - параметры запроса
-
-        Returns:
-            int - ID последней вставленной записи (для INSERT)
-        """
+        """Выполняет запрос на изменение (INSERT, UPDATE, DELETE)"""
         try:
             cursor = self._connection.cursor()
             cursor.execute(query, params)
             self._connection.commit()
             return cursor.lastrowid
         except sqlite3.Error as e:
-            print(f"✗ Ошибка выполнения запроса: {e}")
+            # Теперь PyCharm выведет точную ошибку в консоль, если ты ошибся в SQL
+            print(f"❌ ОШИБКА SQL: {e}\nЗапрос: {query}\nПараметры: {params}")
             self._connection.rollback()
-            raise
+            return None
 
     def fetch_all(self, query, params=()):
         """

@@ -29,19 +29,10 @@ class ClientsManager:
         return self.db.execute(query, (company, address, notes))
 
     def get_all(self):
-        """
-        Получить всех клиентов с основным контактным лицом.
-
-        Returns:
-            list - список клиентов с информацией о главном контакте
-        """
+        """Получить всех клиентов с основной контактной информацией (всегда возвращает список словарей)"""
         query = """
             SELECT 
-                c.id,
-                c.company,
-                c.address,
-                c.notes,
-                c.created_at,
+                c.*,
                 cp.full_name as primary_contact,
                 cp.position as primary_position,
                 cp.phone as primary_phone
@@ -49,20 +40,28 @@ class ClientsManager:
             LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
             ORDER BY c.company
         """
-        return self.db.fetch_all(query)
+        rows = self.db.fetch_all(query)
+
+        # Преобразуем все строки в словари
+        return [dict(row) for row in rows]
 
     def get_by_id(self, client_id):
+        """Получить клиента по ID с основной контактной информацией (всегда возвращает словарь)"""
+        query = """
+            SELECT 
+                c.*,
+                cp.full_name as primary_contact,
+                cp.position as primary_position,
+                cp.phone as primary_phone
+            FROM clients c
+            LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
+            WHERE c.id = ?
         """
-        Получить клиента по ID.
+        row = self.db.fetch_one(query, (client_id,))
 
-        Args:
-            client_id: int - ID клиента
-
-        Returns:
-            sqlite3.Row или None
-        """
-        query = "SELECT * FROM clients WHERE id = ?"
-        return self.db.fetch_one(query, (client_id,))
+        if row:
+            return dict(row)
+        return None
 
     def update(self, client_id, company, address, notes):
         """
@@ -93,62 +92,38 @@ class ClientsManager:
         query = "DELETE FROM clients WHERE id = ?"
         self.db.execute(query, (client_id,))
 
-    def search(self, search_text):
-        """
-        Поиск клиентов по названию компании, адресу или контактному лицу (без учёта регистра).
-
-        Args:
-            search_text: str - текст для поиска
-
-        Returns:
-            list - найденные клиенты
-        """
-        # Приводим поисковый запрос к нижнему регистру в Python
-        search_lower = search_text.lower()
-
+    def search(self, query_text):
+        """Поиск клиентов с основной контактной информацией (возвращает список словарей)"""
+        search_term = f"%{query_text}%"
         query = """
             SELECT 
-                c.id,
-                c.company,
-                c.address,
-                c.notes,
-                c.created_at,
+                c.*,
                 cp.full_name as primary_contact,
                 cp.position as primary_position,
                 cp.phone as primary_phone
             FROM clients c
             LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
+            WHERE c.company LIKE ? OR cp.full_name LIKE ?
             ORDER BY c.company
         """
+        rows = self.db.fetch_all(query, (search_term, search_term))
 
-        # Получаем всех клиентов
-        all_clients = self.db.fetch_all(query)
-
-        # Фильтруем в Python (с учётом русских букв)
-        if not search_lower:
-            return all_clients
-
-        filtered = []
-        for client in all_clients:
-            # Приводим все поля к нижнему регистру и проверяем вхождение
-            company = (client['company'] or '').lower()
-            address = (client['address'] or '').lower()
-            contact = (client['primary_contact'] or '').lower()
-
-            if (search_lower in company or
-                    search_lower in address or
-                    search_lower in contact):
-                filtered.append(client)
-
-        return filtered
+        return [dict(row) for row in rows]
 
     def get_count(self):
-        """
-        Получить количество клиентов.
-
-        Returns:
-            int - количество клиентов
-        """
-        query = "SELECT COUNT(*) as count FROM clients"
-        result = self.db.fetch_one(query)
+        """Количество клиентов"""
+        result = self.db.fetch_one("SELECT COUNT(*) as count FROM clients")
         return result['count'] if result else 0
+
+    def get_primary_contact(self, client_id):
+        """Получить основной контакт клиента (возвращает словарь)"""
+        query = """
+            SELECT * FROM contact_persons 
+            WHERE client_id = ? AND is_primary = 1 
+            LIMIT 1
+        """
+        row = self.db.fetch_one(query, (client_id,))
+
+        if row:
+            return dict(row)
+        return None

@@ -3,6 +3,7 @@
 """
 from managers.database import Database
 from datetime import date, datetime
+from models.task import Task
 
 
 class TasksManager:
@@ -21,14 +22,10 @@ class TasksManager:
     def get_all(self, filter_type="all"):
         """
         Получить задачи с данными о клиентах
-
-        Args:
-            filter_type: 'all', 'active', 'completed', 'overdue'
         """
         query = """
             SELECT 
-                t.id, t.title, t.description, t.due_date, t.completed, t.created_at,
-                t.client_id,
+                t.*, 
                 c.company as client_name
             FROM tasks t
             LEFT JOIN clients c ON t.client_id = c.id
@@ -41,12 +38,24 @@ class TasksManager:
         elif filter_type == 'completed':
             query += " AND t.completed = 1"
         elif filter_type == 'overdue':
-            query += " AND t.completed = 0 AND t.due_date < ?"
-            params.append(date.today().isoformat())
+            # Добавляем логику для просроченных задач
+            query += " AND t.completed = 0 AND t.due_date < DATE('now')"
 
         query += " ORDER BY t.completed ASC, t.due_date ASC"
 
-        return self.db.fetch_all(query, tuple(params))
+        rows = self.db.fetch_all(query, params)
+
+        from models.task import Task
+        tasks = []
+        for row in rows:
+            row_dict = dict(row)
+            # Создаем объект задачи через метод модели
+            task = Task.from_dict(row_dict)
+            # Принудительно сохраняем имя клиента из результата JOIN
+            task.client_name = row_dict.get('client_name', '—')
+            tasks.append(task)
+
+        return tasks
 
     def update(self, task_id, title, description, due_date, client_id):
         """Обновить задачу"""
@@ -69,20 +78,17 @@ class TasksManager:
         query = "DELETE FROM tasks WHERE id = ?"
         self.db.execute(query, (task_id,))
 
-    def search(self, text):
-        """Поиск по названию или клиенту"""
-        search = f"%{text}%"
+    def search(self, query_text):
+        """Поиск клиентов (возвращает список словарей)"""
+        search_term = f"%{query_text}%"
         query = """
-            SELECT 
-                t.id, t.title, t.description, t.due_date, t.completed, t.created_at,
-                t.client_id,
-                c.company as client_name
-            FROM tasks t
-            LEFT JOIN clients c ON t.client_id = c.id
-            WHERE t.title LIKE ? OR c.company LIKE ?
-            ORDER BY t.completed ASC, t.due_date ASC
+            SELECT * FROM clients 
+            WHERE company LIKE ? OR primary_contact LIKE ?
+            ORDER BY company
         """
-        return self.db.fetch_all(query, (search, search))
+        rows = self.db.fetch_all(query, (search_term, search_term))
+
+        return [dict(row) for row in rows]
 
     def get_count(self, only_active=True):
         """Количество задач"""
@@ -91,3 +97,64 @@ class TasksManager:
         else:
             res = self.db.fetch_one("SELECT COUNT(*) as c FROM tasks")
         return res['c']
+
+    def update_task(self, task_id, title, description, status, priority, due_date, client_id=None):
+        """Полностью исправленный метод обновления с учетом клиента"""
+        query = """
+            UPDATE tasks 
+            SET title = ?, 
+                description = ?, 
+                completed = ?, 
+                priority = ?, 
+                due_date = ?, 
+                client_id = ?
+            WHERE id = ?
+        """
+        # Превращаем статус во флаг 0 или 1 для базы данных
+        is_done = 1 if status else 0
+
+        # ВАЖНО: порядок аргументов в кортеже должен строго совпадать с порядком ? в query
+        self.db.execute(query, (
+            title,
+            description,
+            is_done,
+            priority,
+            due_date,
+            client_id,
+            task_id
+        ))
+
+    def get_by_id(self, task_id):
+        """Получить одну задачу по её ID для смены статуса"""
+        query = """
+            SELECT t.*, c.company as client_name 
+            FROM tasks t 
+            LEFT JOIN clients c ON t.client_id = c.id 
+            WHERE t.id = ?
+        """
+        data = self.db.fetch_one(query, (task_id,))
+        return Task.from_dict(data)
+
+    def update_task_status(self, task_id, status):
+        """Метод для мгновенного переключения галочки"""
+        query = "UPDATE tasks SET completed = ? WHERE id = ?"
+        return self.db.execute(query, (1 if status else 0, task_id))
+
+    def get_active_tasks(self):
+        """Получить активные (не выполненные) задачи"""
+        from datetime import date
+        tasks = self.get_all()
+        return [task for task in tasks if not task.completed]
+
+    def get_completed_tasks(self):
+        """Получить выполненные задачи"""
+        tasks = self.get_all()
+        return [task for task in tasks if task.completed]
+
+    def get_overdue_tasks(self):
+        """Получить просроченные задачи"""
+        from datetime import date
+        tasks = self.get_all()
+        today = date.today()
+        return [task for task in tasks
+                if task.due_date and task.due_date < today and not task.completed]

@@ -4,12 +4,20 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/diplom_srm.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="srm_fmm&#10;сделано окно клиентов и задач">
+      <changelist_data name="BibleBoble" email="vasabobalev@gmail.com" automatic="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/clients_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/clients_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/contracts_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/contracts_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/emails_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/emails_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/tasks_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/tasks_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/task.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/task.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/tasks_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/tasks_view.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -24,8 +32,25 @@
     </option>
   </component>
   <component name="Git.Settings">
+    <option name="PREVIOUS_COMMIT_AUTHORS">
+      <list>
+        <option value="BibleBoble &lt;vasabobalev@gmail.com&gt;" />
+      </list>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
+  "lastFilter": {
+    "state": "OPEN",
+    "assignee": "BibleBoble"
+  }
+}]]></component>
+  <component name="GithubPullRequestsUISettings"><![CDATA[{
+  "selectedUrlAndAccountId": {
+    "url": "https://github.com/BibleBoble/srm_fmm.git",
+    "accountId": "9598d846-d315-4271-a4c5-9a25288ef0e2"
+  }
+}]]></component>
   <component name="ProjectColorInfo"><![CDATA[{
   "associatedIndex": 1
 }]]></component>
@@ -40,17 +65,23 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Python.__init__.executor": "Run",
     "Python.app.executor": "Run",
     "Python.client.executor": "Run",
     "Python.clients_manager.executor": "Run",
     "Python.clients_view.executor": "Run",
+    "Python.contracts_manager.executor": "Run",
     "Python.create_structure.executor": "Run",
+    "Python.database.executor": "Run",
+    "Python.emails_manager.executor": "Run",
     "Python.main.executor": "Run",
     "Python.test_confirmation.executor": "Run",
     "Python.test_database.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "master"
+    "git-widget-placeholder": "master",
+    "settings.editor.selected.configurable": "preferences.lookFeel"
   }
 }]]></component>
   <component name="RunManager">
@@ -97,6 +128,23 @@
       <option name="presentableId" value="Default" />
       <updated>1769463368787</updated>
     </task>
+    <task id="LOCAL-00001" summary="srm_fmm&#10;сделано окно клиентов и задач">
+      <option name="closed" value="true" />
+      <created>1769614950233</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1769614950233</updated>
+    </task>
+    <task id="LOCAL-00002" summary="srm_fmm&#10;сделано окно клиентов и задач">
+      <option name="closed" value="true" />
+      <created>1769615094087</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1769615094087</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -104,10 +152,20 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="CUSTOM_BOOLEAN_PROPERTIES">
+                <map>
+                  <entry key="Show.Git.Branches" value="false" />
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
     </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="srm_fmm&#10;сделано окно клиентов и задач" />
+    <option name="LAST_COMMIT_MESSAGE" value="srm_fmm&#10;сделано окно клиентов и задач" />
   </component>
 </project>
