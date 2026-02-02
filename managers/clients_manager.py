@@ -29,39 +29,57 @@ class ClientsManager:
         return self.db.execute(query, (company, address, notes))
 
     def get_all(self):
-        """Получить всех клиентов с основной контактной информацией (всегда возвращает список словарей)"""
+        """Получить всех клиентов с основной контактной информацией"""
         query = """
             SELECT 
                 c.*,
                 cp.full_name as primary_contact,
                 cp.position as primary_position,
-                cp.phone as primary_phone
+                cp.phone as primary_phone,
+                ce.email as primary_email
             FROM clients c
             LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
+            LEFT JOIN contact_emails ce ON cp.id = ce.contact_person_id AND ce.is_primary = 1
             ORDER BY c.company
         """
         rows = self.db.fetch_all(query)
-
-        # Преобразуем все строки в словари
         return [dict(row) for row in rows]
 
     def get_by_id(self, client_id):
-        """Получить клиента по ID с основной контактной информацией (всегда возвращает словарь)"""
+        """Получить клиента по ID с основной контактной информацией"""
         query = """
             SELECT 
                 c.*,
                 cp.full_name as primary_contact,
                 cp.position as primary_position,
-                cp.phone as primary_phone
+                cp.phone as primary_phone,
+                ce.email as primary_email
             FROM clients c
             LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
+            LEFT JOIN contact_emails ce ON cp.id = ce.contact_person_id AND ce.is_primary = 1
             WHERE c.id = ?
         """
         row = self.db.fetch_one(query, (client_id,))
+        return dict(row) if row else None
 
-        if row:
-            return dict(row)
-        return None
+    def search(self, query_text):
+        """Поиск клиентов с основной контактной информацией"""
+        search_term = f"%{query_text}%"
+        query = """
+            SELECT 
+                c.*,
+                cp.full_name as primary_contact,
+                cp.position as primary_position,
+                cp.phone as primary_phone,
+                ce.email as primary_email
+            FROM clients c
+            LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
+            LEFT JOIN contact_emails ce ON cp.id = ce.contact_person_id AND ce.is_primary = 1
+            WHERE c.company LIKE ? OR cp.full_name LIKE ? OR ce.email LIKE ?
+            ORDER BY c.company
+        """
+        rows = self.db.fetch_all(query, (search_term, search_term, search_term))
+        return [dict(row) for row in rows]
 
     def update(self, client_id, company, address, notes):
         """
@@ -91,24 +109,6 @@ class ClientsManager:
         """
         query = "DELETE FROM clients WHERE id = ?"
         self.db.execute(query, (client_id,))
-
-    def search(self, query_text):
-        """Поиск клиентов с основной контактной информацией (возвращает список словарей)"""
-        search_term = f"%{query_text}%"
-        query = """
-            SELECT 
-                c.*,
-                cp.full_name as primary_contact,
-                cp.position as primary_position,
-                cp.phone as primary_phone
-            FROM clients c
-            LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
-            WHERE c.company LIKE ? OR cp.full_name LIKE ?
-            ORDER BY c.company
-        """
-        rows = self.db.fetch_all(query, (search_term, search_term))
-
-        return [dict(row) for row in rows]
 
     def get_count(self):
         """Количество клиентов"""

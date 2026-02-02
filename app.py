@@ -8,6 +8,7 @@ from datetime import date
 from managers.clients_manager import ClientsManager
 from managers.contracts_manager import ContractsManager
 from managers.tasks_manager import TasksManager
+from managers.experts_manager import ExpertsManager
 
 # Импортируем представления
 from views.calendar_view import CalendarView
@@ -37,20 +38,22 @@ class App:
         self.clients_mgr = ClientsManager()
         self.contracts_mgr = ContractsManager()
         self.tasks_mgr = TasksManager()
+        self.experts_mgr = ExpertsManager()  # <-- Уже есть здесь
+        self.experts_view = None  # <-- Уже есть здесь
 
         from managers.contact_persons_manager import ContactPersonsManager
-        from managers.emails_manager import EmailsManager
+        from managers.contact_emails_manager import ContactEmailsManager  # Изменено
         from managers.interactions_manager import InteractionsManager
 
         self.contact_persons_mgr = ContactPersonsManager()
-        self.emails_mgr = EmailsManager()
+        self.contact_emails_mgr = ContactEmailsManager()  # Изменено
         self.interactions_mgr = InteractionsManager()
 
         # Представления (создадим после создания content_frame)
         self.calendar_view = None
         self.clients_view = None
         self.contracts_view = None
-        self.experts_view = None
+        self.experts_view = None  # <-- Это дубликат, но можно оставить для ясности
         self.tasks_view = None
         self.reports_view = None
 
@@ -164,18 +167,18 @@ class App:
             on_date_click_callback=self.on_date_click
         )
 
-        # ПЕРЕДАЕМ ВСЕ МЕНЕДЖЕРЫ, включая tasks_mgr
+        # ПЕРЕДАЕМ ВСЕ МЕНЕДЖЕРЫ, включая tasks_mgr и contact_emails_mgr
         self.clients_view = ClientsView(
             self.content_frame,
             self.clients_mgr,
             self.contact_persons_mgr,
-            self.emails_mgr,
+            self.contact_emails_mgr,  # Изменено
             self.interactions_mgr,
-            self.tasks_mgr  # ← ВОТ ЭТО КЛЮЧЕВОЕ ИЗМЕНЕНИЕ!
+            self.tasks_mgr
         )
 
         self.contracts_view = ContractsView(self.content_frame)
-        self.experts_view = ExpertsView(self.content_frame)
+        self.experts_view = ExpertsView(self.content_frame, self.experts_mgr)
         self.tasks_view = TasksView(self.content_frame, self.tasks_mgr, self.clients_mgr)
         self.reports_view = ReportsView(self.content_frame)
 
@@ -228,9 +231,9 @@ class App:
         self.contracts_view.show()
 
     def show_experts(self):
-        """Показывает раздел 'Эксперты'"""
-        print("→ Переход на: Эксперты")
-        self._set_active_menu("Эксперты")
+        if not self.experts_view:
+            # Создаем представление с менеджером
+            self.experts_view = ExpertsView(self.main_frame, self.experts_mgr)
         self.experts_view.show()
 
     def show_tasks(self):

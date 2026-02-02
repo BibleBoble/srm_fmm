@@ -57,6 +57,39 @@ class TasksManager:
 
         return tasks
 
+    def get_by_client(self, client_id):
+        """Получить все задачи клиента"""
+        try:
+            # ИСПРАВЛЕНО: используем self.db вместо self.cursor
+            query = """
+                SELECT t.*, c.company as client_name 
+                FROM tasks t
+                LEFT JOIN clients c ON t.client_id = c.id
+                WHERE t.client_id = ? 
+                ORDER BY t.created_at DESC
+            """
+            rows = self.db.fetch_all(query, (client_id,))
+
+            tasks = []
+            for row in rows:
+                # Преобразуем sqlite3.Row в словарь
+                if hasattr(row, 'keys'):
+                    row_dict = {}
+                    for key in row.keys():
+                        row_dict[key] = row[key]
+                    task = Task.from_dict(row_dict)
+                    task.client_name = row_dict.get('client_name', '—')
+                else:
+                    task = Task.from_dict(dict(row))
+                    task.client_name = dict(row).get('client_name', '—')
+
+                tasks.append(task)
+
+            return tasks
+        except Exception as e:
+            print(f"Ошибка при получении задач клиента: {e}")
+            return []
+
     def update(self, task_id, title, description, due_date, client_id):
         """Обновить задачу"""
         query = """
@@ -79,16 +112,28 @@ class TasksManager:
         self.db.execute(query, (task_id,))
 
     def search(self, query_text):
-        """Поиск клиентов (возвращает список словарей)"""
+        """Поиск задач"""
         search_term = f"%{query_text}%"
         query = """
-            SELECT * FROM clients 
-            WHERE company LIKE ? OR primary_contact LIKE ?
-            ORDER BY company
+            SELECT 
+                t.*, 
+                c.company as client_name
+            FROM tasks t
+            LEFT JOIN clients c ON t.client_id = c.id
+            WHERE t.title LIKE ? OR t.description LIKE ? OR c.company LIKE ?
+            ORDER BY t.completed ASC, t.due_date ASC
         """
-        rows = self.db.fetch_all(query, (search_term, search_term))
+        rows = self.db.fetch_all(query, (search_term, search_term, search_term))
 
-        return [dict(row) for row in rows]
+        from models.task import Task
+        tasks = []
+        for row in rows:
+            row_dict = dict(row)
+            task = Task.from_dict(row_dict)
+            task.client_name = row_dict.get('client_name', '—')
+            tasks.append(task)
+
+        return tasks
 
     def get_count(self, only_active=True):
         """Количество задач"""
@@ -125,20 +170,55 @@ class TasksManager:
         ))
 
     def get_by_id(self, task_id):
-        """Получить одну задачу по её ID для смены статуса"""
-        query = """
-            SELECT t.*, c.company as client_name 
-            FROM tasks t 
-            LEFT JOIN clients c ON t.client_id = c.id 
-            WHERE t.id = ?
-        """
-        data = self.db.fetch_one(query, (task_id,))
-        return Task.from_dict(data)
+        """Получить задачу по ID"""
+        try:
+            # ИСПРАВЛЕНО: используем self.db вместо self.cursor
+            query = """
+                   SELECT t.*, c.company as client_name 
+                   FROM tasks t
+                   LEFT JOIN clients c ON t.client_id = c.id
+                   WHERE t.id = ?
+               """
+            data = self.db.fetch_one(query, (task_id,))
+
+            if not data:
+                return None
+
+            # Преобразуем sqlite3.Row в словарь если нужно
+            if hasattr(data, 'keys'):
+                # Это sqlite3.Row
+                data_dict = {}
+                for key in data.keys():
+                    data_dict[key] = data[key]
+                data = data_dict
+
+            task = Task.from_dict(data)
+            task.client_name = data.get('client_name', '—')
+            return task
+
+        except Exception as e:
+            print(f"Ошибка при получении задачи: {e}")
+            return None
 
     def update_task_status(self, task_id, status):
         """Метод для мгновенного переключения галочки"""
         query = "UPDATE tasks SET completed = ? WHERE id = ?"
         return self.db.execute(query, (1 if status else 0, task_id))
+
+    def update_status(self, task_id, status_str):
+        """Обновить статус задачи строковым значением"""
+        # Преобразуем строковый статус в булево значение для БД
+        status_map = {
+            'Выполнена': True,
+            'Новая': False,
+            'В работе': False,
+            'Отложена': False,
+            'Отменена': False
+        }
+        is_completed = status_map.get(status_str, False)
+
+        query = "UPDATE tasks SET completed = ?, status = ? WHERE id = ?"
+        return self.db.execute(query, (1 if is_completed else 0, status_str, task_id))
 
     def get_active_tasks(self):
         """Получить активные (не выполненные) задачи"""

@@ -4,20 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="srm_fmm&#10;сделано окно клиентов и задач">
-      <changelist_data name="BibleBoble" email="vasabobalev@gmail.com" automatic="false" />
+    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="сделан однотипный дизайн для разделов задачи и клиенты">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/main.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/clients_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/clients_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/contracts_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/contracts_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/contact_persons_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/contact_persons_manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/emails_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/emails_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/experts_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/experts_manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/tasks_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/tasks_manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/models/task.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/task.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/tasks_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/tasks_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/experts_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/experts_view.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -65,6 +63,8 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Notification.DisplayName-DoNotAsk-git.push.result": "",
+    "Notification.DoNotAsk-git.push.result": "true",
     "Python.__init__.executor": "Run",
     "Python.app.executor": "Run",
     "Python.client.executor": "Run",
@@ -75,6 +75,8 @@
     "Python.database.executor": "Run",
     "Python.emails_manager.executor": "Run",
     "Python.main.executor": "Run",
+    "Python.migrate_database.executor": "Run",
+    "Python.migrate_emails.executor": "Run",
     "Python.test_confirmation.executor": "Run",
     "Python.test_database.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
@@ -144,7 +146,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769615094087</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="сделан однотипный дизайн для разделов задачи и клиенты">
+      <option name="closed" value="true" />
+      <created>1769881205974</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1769881205974</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -166,6 +176,7 @@
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="srm_fmm&#10;сделано окно клиентов и задач" />
-    <option name="LAST_COMMIT_MESSAGE" value="srm_fmm&#10;сделано окно клиентов и задач" />
+    <MESSAGE value="сделан однотипный дизайн для разделов задачи и клиенты" />
+    <option name="LAST_COMMIT_MESSAGE" value="сделан однотипный дизайн для разделов задачи и клиенты" />
   </component>
 </project>

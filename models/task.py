@@ -18,6 +18,7 @@ class Task:
         self.completed = completed
         self.client_id = client_id
         self.created_at = created_at or datetime.now()
+        self.priority = priority  # ← ДОБАВЬТЕ ЭТО
 
     def __repr__(self):
         """Строковое представление объекта для отладки"""
@@ -29,6 +30,11 @@ class Task:
         status = "Выполнена" if self.completed else "Не выполнена"
         return f"{self.title} [{status}] ({self.priority})"
 
+    @property
+    def status(self):
+        """Свойство для получения статуса в текстовом виде"""
+        return "Выполнена" if self.completed else "Новая"
+
     def to_dict(self):
         """Преобразовать объект в словарь для сохранения или передачи"""
         return {
@@ -39,7 +45,8 @@ class Task:
             'completed': self.completed,
             'client_id': self.client_id,
             'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
-            'priority': self.priority
+            'priority': self.priority,
+            'status': self.status  # ← ДОБАВЬТЕ status в словарь
         }
 
     @staticmethod
@@ -48,22 +55,33 @@ class Task:
         if not data:
             return None
 
-        due_date = data['due_date']
+        # Преобразуем даты
+        due_date = data.get('due_date')
         if isinstance(due_date, str):
             try:
                 due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
             except:
-                due_date = None
+                try:
+                    due_date = datetime.strptime(due_date, '%Y-%m-%d %H:%M:%S').date()
+                except:
+                    due_date = None
+
+        created_at = data.get('created_at')
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+            except:
+                created_at = datetime.now()
 
         return Task(
-            id=data['id'],
-            title=data['title'],
-            description=data['description'],
+            id=data.get('id'),
+            title=data.get('title', ''),
+            description=data.get('description', ''),
             due_date=due_date,
-            completed=bool(data['completed']),
-            client_id=data['client_id'],
-            created_at=data['created_at'],
-            priority=None  # Больше не используем
+            completed=bool(data.get('completed', 0)),
+            client_id=data.get('client_id'),
+            created_at=created_at,
+            priority=data.get('priority')  # ← ИСПРАВЬТЕ: было None
         )
 
     def is_valid(self):
