@@ -108,12 +108,65 @@ class Sizes:
     # Отступы
     PADDING_SMALL = 5
     PADDING_MEDIUM = 10
+    PADDING_MEDIUMRARE = 15
     PADDING_LARGE = 20
     PADDING_XLARGE = 30
 
     # Таблицы
     TABLE_ROW_HEIGHT = 40
     TABLE_MAX_ROWS = 25
+    TABLE_VISIBLE_ROWS = 25  # Высота Treeview в строках
+
+    # Верхняя панель разделов (поиск, кнопки)
+    TOP_PANEL_HEIGHT = 70
+    TOP_PANEL_PADDING_X = 20
+    TOP_PANEL_PADDING_Y = 15
+
+    # Панель пагинации
+    PAGINATION_HEIGHT = 80
+    PAGINATION_BUTTON_WIDTH = 80
+
+    # Поле поиска
+    SEARCH_ENTRY_WIDTH = 50
+
+
+# ============================================
+# ТАБЛИЧНЫЕ ПРЕДСТАВЛЕНИЯ (TableViewTemplate)
+# ============================================
+
+class TableView:
+    """Константы для шаблона табличных представлений (клиенты, эксперты и т.д.)"""
+
+    # Цвета
+    TOP_PANEL_BG = "#f0f0f0"
+    TABLE_BG = "#ffffff"
+    ROW_EVEN = "#f8f9fa"
+    ROW_ODD = "#ffffff"
+    ROW_HOVER = "#e8f4f8"
+    HEADING_BG = "#333333"
+    HEADING_FG = "#ffffff"
+    HEADING_ACTIVE = "#444444"
+    BUTTON_BG = "#41a5be"
+    BUTTON_FG = "black"
+    LABEL_FG = "#333"
+    HINT_FG = "#666"
+    PAGINATION_BG = "#f0f0f0"
+    PAGINATION_BUTTON_BG = "#41a5be"
+    PAGINATION_BUTTON_DISABLED = "#cccccc"
+
+    # Шрифты
+    INFO_FONT = (Fonts.FAMILY, 11, "bold")
+    LABEL_FONT = (Fonts.FAMILY, 10)
+    SEARCH_FONT = (Fonts.FAMILY, 12)
+    BUTTON_FONT = (Fonts.FAMILY, 11, "bold")
+    TABLE_FONT = (Fonts.FAMILY, 10)
+    HEADING_FONT = (Fonts.FAMILY, 10, "bold")
+    PAGINATION_FONT = (Fonts.FAMILY, 10)
+
+    # Ширины колонок по умолчанию
+    COLUMN_ID_WIDTH = 50
+    COLUMN_DEFAULT_WIDTH = 150
+    COLUMN_WIDE_WIDTH = 250
 
 
 # ============================================
@@ -135,7 +188,7 @@ class Limits:
     MAX_NOTES_LENGTH = 1000
 
     # Пагинация
-    ITEMS_PER_PAGE = 30
+    ITEMS_PER_PAGE = 50
     MAX_ITEMS_PER_PAGE = 100
 
 
@@ -351,6 +404,7 @@ __all__ = [
     'Colors',
     'Fonts',
     'Sizes',
+    'TableView',
     'Limits',
     'UISettings',
     'DBSettings',

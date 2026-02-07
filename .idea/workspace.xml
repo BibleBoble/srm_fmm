@@ -4,18 +4,19 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="сделан однотипный дизайн для разделов задачи и клиенты">
+    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="обновлена логика проекта, сделан шаблон разделов">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/clients_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/clients_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/contact_persons_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/contact_persons_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database_backup_20260202_230026.db" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/database_backup_20260202_230641.db" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/experts_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/experts_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/tasks_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/tasks_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/models/task.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/task.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/constants.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/constants.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/calendar_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/calendar_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views/experts_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/experts_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/table_view_template.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/table_view_template.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/tasks_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/tasks_view.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -37,21 +38,21 @@
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "BibleBoble"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;BibleBoble&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/BibleBoble/srm_fmm.git",
-    "accountId": "9598d846-d315-4271-a4c5-9a25288ef0e2"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/BibleBoble/srm_fmm.git&quot;,
+    &quot;accountId&quot;: &quot;9598d846-d315-4271-a4c5-9a25288ef0e2&quot;
   }
-}]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 1
-}]]></component>
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 1
+}</component>
   <component name="ProjectId" id="38oQJ2pr5s7ZP7k4isOGMGbRGC9" />
   <component name="ProjectLevelVcsManager">
     <ConfirmationsSetting value="1" id="Add" />
@@ -60,32 +61,35 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Notification.DisplayName-DoNotAsk-git.push.result": "",
-    "Notification.DoNotAsk-git.push.result": "true",
-    "Python.__init__.executor": "Run",
-    "Python.app.executor": "Run",
-    "Python.client.executor": "Run",
-    "Python.clients_manager.executor": "Run",
-    "Python.clients_view.executor": "Run",
-    "Python.contracts_manager.executor": "Run",
-    "Python.create_structure.executor": "Run",
-    "Python.database.executor": "Run",
-    "Python.emails_manager.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.migrate_database.executor": "Run",
-    "Python.migrate_emails.executor": "Run",
-    "Python.test_confirmation.executor": "Run",
-    "Python.test_database.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "master",
-    "settings.editor.selected.configurable": "preferences.lookFeel"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Notification.DisplayName-DoNotAsk-git.push.result&quot;: &quot;&quot;,
+    &quot;Notification.DoNotAsk-git.push.result&quot;: &quot;true&quot;,
+    &quot;Python.Restore_and_migrate.executor&quot;: &quot;Run&quot;,
+    &quot;Python.__init__.executor&quot;: &quot;Run&quot;,
+    &quot;Python.app.executor&quot;: &quot;Run&quot;,
+    &quot;Python.client.executor&quot;: &quot;Run&quot;,
+    &quot;Python.clients_manager.executor&quot;: &quot;Run&quot;,
+    &quot;Python.clients_view.executor&quot;: &quot;Run&quot;,
+    &quot;Python.contracts_manager.executor&quot;: &quot;Run&quot;,
+    &quot;Python.create_structure.executor&quot;: &quot;Run&quot;,
+    &quot;Python.database.executor&quot;: &quot;Run&quot;,
+    &quot;Python.emails_manager.executor&quot;: &quot;Run&quot;,
+    &quot;Python.fix_database.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.migrate_database.executor&quot;: &quot;Run&quot;,
+    &quot;Python.migrate_emails.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_confirmation.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_database.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_task_dialog.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="diplom_srm" />
@@ -154,7 +158,31 @@
       <option name="project" value="LOCAL" />
       <updated>1769881205974</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="сделан однотипный дизайн для разделов задачи и клиенты">
+      <option name="closed" value="true" />
+      <created>1770062980379</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1770062980379</updated>
+    </task>
+    <task id="LOCAL-00005" summary="обновлена логика проекта, сделан шаблон разделов">
+      <option name="closed" value="true" />
+      <created>1770063013381</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1770063013381</updated>
+    </task>
+    <task id="LOCAL-00006" summary="обновлена логика проекта, сделан шаблон разделов">
+      <option name="closed" value="true" />
+      <created>1770063078448</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1770063078448</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -177,6 +205,7 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="srm_fmm&#10;сделано окно клиентов и задач" />
     <MESSAGE value="сделан однотипный дизайн для разделов задачи и клиенты" />
-    <option name="LAST_COMMIT_MESSAGE" value="сделан однотипный дизайн для разделов задачи и клиенты" />
+    <MESSAGE value="обновлена логика проекта, сделан шаблон разделов" />
+    <option name="LAST_COMMIT_MESSAGE" value="обновлена логика проекта, сделан шаблон разделов" />
   </component>
 </project>

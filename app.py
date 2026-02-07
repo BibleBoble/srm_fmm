@@ -53,7 +53,6 @@ class App:
         self.calendar_view = None
         self.clients_view = None
         self.contracts_view = None
-        self.experts_view = None  # <-- Это дубликат, но можно оставить для ясности
         self.tasks_view = None
         self.reports_view = None
 
@@ -214,36 +213,36 @@ class App:
 
     def show_main(self):
         """Показывает главную страницу (календарь)"""
-        print("→ Переход на: Главная")
+        print("-> Переход на: Главная")
         self._set_active_menu("Главная")
         self.calendar_view.show()
 
     def show_clients(self):
         """Показывает раздел 'Клиенты'"""
-        print("→ Переход на: Клиенты")
+        print("-> Переход на: Клиенты")
         self._set_active_menu("Клиенты")
         self.clients_view.show()
 
     def show_contracts(self):
         """Показывает раздел 'Договора'"""
-        print("→ Переход на: Договора")
+        print("-> Переход на: Договора")
         self._set_active_menu("Договора")
         self.contracts_view.show()
 
     def show_experts(self):
-        if not self.experts_view:
-            # Создаем представление с менеджером
-            self.experts_view = ExpertsView(self.main_frame, self.experts_mgr)
+        """Показывает раздел 'Эксперты'"""
+        print("-> Переход на: Эксперты")
+        self._set_active_menu("Эксперты")
         self.experts_view.show()
 
     def show_tasks(self):
         """Показывает раздел 'Задачи'"""
-        print("→ Переход на: Задачи")
+        print("-> Переход на: Задачи")
         self._set_active_menu("Задачи")
         self.tasks_view.show()
 
     def show_reports(self):
         """Показывает раздел 'Отчеты'"""
-        print("→ Переход на: Отчеты")
+        print("-> Переход на: Отчеты")
         self._set_active_menu("Отчеты")
         self.reports_view.show()

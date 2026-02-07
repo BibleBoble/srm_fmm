@@ -88,12 +88,15 @@ class Database:
             # Включаем внешние ключи (для связей между таблицами)
             self._connection.execute("PRAGMA foreign_keys = ON")
             
-            # Оптимизация производительности
-            self._connection.execute("PRAGMA journal_mode = WAL")  # Write-Ahead Logging
-            self._connection.execute("PRAGMA synchronous = NORMAL")
+            # Оптимизация производительности (опционально - может не работать в некоторых средах)
+            try:
+                self._connection.execute("PRAGMA journal_mode = WAL")
+                self._connection.execute("PRAGMA synchronous = NORMAL")
+            except sqlite3.Error:
+                self.logger.warning(f"Не удалось установить WAL режим: {e}")
             
             self.logger.info(f"Подключение к БД '{self.db_path}' установлено")
-            print(f"✓ Подключение к БД '{self.db_path}' установлено")
+            print(f"[OK] Подключение к БД '{self.db_path}' установлено")
             
             # Создаём таблицы, если их нет
             self._create_tables()
@@ -101,7 +104,7 @@ class Database:
         except sqlite3.Error as e:
             error_msg = f"Ошибка подключения к БД: {e}"
             self.logger.error(error_msg)
-            print(f"✗ {error_msg}")
+            print(f"[!] {error_msg}")
             raise DatabaseError(error_msg) from e
 
     def _create_tables(self) -> None:
@@ -281,12 +284,12 @@ class Database:
             
             self._connection.commit()
             self.logger.info("Таблицы и индексы созданы/проверены")
-            print("✓ Таблицы созданы/проверены")
+            print("[OK] Таблицы созданы/проверены")
             
         except sqlite3.Error as e:
             error_msg = f"Ошибка создания таблиц: {e}"
             self.logger.error(error_msg)
-            print(f"✗ {error_msg}")
+            print(f"[!] {error_msg}")
             raise DatabaseError(error_msg) from e
 
     def execute(self, query: str, params: Tuple = ()) -> Optional[int]:
@@ -315,7 +318,7 @@ class Database:
             except sqlite3.Error as e:
                 error_msg = f"ОШИБКА SQL: {e}\nЗапрос: {query}\nПараметры: {params}"
                 self.logger.error(error_msg)
-                print(f"❌ {error_msg}")
+                print(f"[ERR] {error_msg}")
                 
                 self._connection.rollback()
                 return None
@@ -343,7 +346,7 @@ class Database:
             except sqlite3.Error as e:
                 error_msg = f"Ошибка получения данных: {e}\nЗапрос: {query}"
                 self.logger.error(error_msg)
-                print(f"✗ {error_msg}")
+                print(f"[!] {error_msg}")
                 return []
 
     def fetch_one(self, query: str, params: Tuple = ()) -> Optional[sqlite3.Row]:
@@ -369,7 +372,7 @@ class Database:
             except sqlite3.Error as e:
                 error_msg = f"Ошибка получения данных: {e}\nЗапрос: {query}"
                 self.logger.error(error_msg)
-                print(f"✗ {error_msg}")
+                print(f"[!] {error_msg}")
                 return None
 
     def execute_many(self, query: str, params_list: List[Tuple]) -> bool:
@@ -395,7 +398,7 @@ class Database:
             except sqlite3.Error as e:
                 error_msg = f"Ошибка batch insert: {e}"
                 self.logger.error(error_msg)
-                print(f"❌ {error_msg}")
+                print(f"[ERR] {error_msg}")
                 
                 self._connection.rollback()
                 return False
@@ -451,12 +454,12 @@ class Database:
             try:
                 self._connection.execute("VACUUM")
                 self.logger.info("БД оптимизирована (VACUUM)")
-                print("✓ БД оптимизирована")
+                print("[OK] БД оптимизирована")
                 return True
             except sqlite3.Error as e:
                 error_msg = f"Ошибка VACUUM: {e}"
                 self.logger.error(error_msg)
-                print(f"✗ {error_msg}")
+                print(f"[!] {error_msg}")
                 return False
 
     def backup(self, backup_path: str) -> bool:
@@ -476,13 +479,13 @@ class Database:
                 backup_conn.close()
                 
                 self.logger.info(f"Создана резервная копия: {backup_path}")
-                print(f"✓ Создана резервная копия: {backup_path}")
+                print(f"[OK] Создана резервная копия: {backup_path}")
                 return True
                 
             except sqlite3.Error as e:
                 error_msg = f"Ошибка создания резервной копии: {e}"
                 self.logger.error(error_msg)
-                print(f"✗ {error_msg}")
+                print(f"[!] {error_msg}")
                 return False
 
     def close(self) -> None:
@@ -490,7 +493,7 @@ class Database:
         if self._connection:
             self._connection.close()
             self.logger.info("Соединение с БД закрыто")
-            print("✓ Соединение с БД закрыто")
+            print("[OK] Соединение с БД закрыто")
             
             # Сбрасываем singleton для возможности переподключения
             Database._instance = None
@@ -554,7 +557,7 @@ def print_db_info(db: Database) -> None:
     print("ИНФОРМАЦИЯ О БАЗЕ ДАННЫХ")
     print("=" * 50)
     print(f"Путь: {db.db_path}")
-    print(f"Подключение: {'✓ Активно' if db._connection else '✗ Не подключено'}")
+    print(f"Подключение: {'[OK] Активно' if db._connection else '[!] Не подключено'}")
     
     stats = get_db_stats(db)
     print(f"\nВсего записей: {stats['total_records']}")
@@ -585,15 +588,15 @@ if __name__ == "__main__":
         "INSERT INTO clients (company, address) VALUES (?, ?)",
         ("Тестовая компания", "Тестовый адрес")
     )
-    print(f"✓ Добавлен клиент с ID: {client_id}")
+    print(f"[OK] Добавлен клиент с ID: {client_id}")
     
     # Тестируем выборку
     clients = db.fetch_all("SELECT * FROM clients")
-    print(f"✓ Найдено клиентов: {len(clients)}")
+    print(f"[OK] Найдено клиентов: {len(clients)}")
     
     # Тестируем информацию о таблице
     table_info = db.get_table_info('clients')
-    print(f"✓ Структура таблицы clients: {len(table_info)} колонок")
+    print(f"[OK] Структура таблицы clients: {len(table_info)} колонок")
     
     # Создаем резервную копию
     db.backup("test_backup.db")
@@ -601,4 +604,4 @@ if __name__ == "__main__":
     # Закрываем
     db.close()
     
-    print("\n✓ Все тесты пройдены!")
+    print("\n[OK] Все тесты пройдены!")

@@ -8,9 +8,90 @@ class ExpertsManager:
         self.db = Database()
 
     # Эксперты (основная запись)
-    def add_expert(self, name: str) -> int:
-        query = "INSERT INTO experts (name) VALUES (?)"
-        return self.db.execute(query, (name.strip(),))
+    def add_expert(self, expert_data: dict) -> int:
+        """Добавляет нового эксперта с полной информацией"""
+        try:
+            # Добавляем основную запись
+            name = expert_data.get('name', '').strip()
+            if not name:
+                raise ValueError("Имя эксперта обязательно")
+            
+            query = "INSERT INTO experts (name, notes) VALUES (?, ?)"
+            expert_id = self.db.execute(query, (name, expert_data.get('notes', '').strip()))
+            
+            # Добавляем основной контакт если есть
+            if expert_data.get('primary_contact') or expert_data.get('primary_phone') or expert_data.get('primary_email'):
+                self.add_contact(
+                    expert_id,
+                    expert_data.get('primary_contact', ''),
+                    phone=expert_data.get('primary_phone', ''),
+                    email=expert_data.get('primary_email', ''),
+                    is_primary=True
+                )
+            
+            # Добавляем специализации
+            if expert_data.get('specializations'):
+                specs = [s.strip() for s in expert_data['specializations'].split(',') if s.strip()]
+                for spec in specs:
+                    self.add_specialization(expert_id, spec)
+            
+            return expert_id
+        except Exception as e:
+            print(f"Ошибка при добавлении эксперта: {e}")
+            return None
+
+    def add_expert_with_contacts(self, expert_data: dict) -> int:
+        """Добавляет нового эксперта с несколькими контактными лицами"""
+        try:
+            # Добавляем основную запись
+            name = expert_data.get('name', '').strip()
+            if not name:
+                raise ValueError("Название компании обязательно")
+            
+            query = "INSERT INTO experts (name, notes) VALUES (?, ?)"
+            expert_id = self.db.execute(query, (name, expert_data.get('notes', '').strip()))
+            
+            if not expert_id:
+                print("❌ Не удалось создать эксперта - expert_id is None")
+                return None
+            
+            print(f"✓ Эксперт создан с ID: {expert_id}")
+            
+            # Добавляем контактные лица
+            if expert_data.get('contacts'):
+                for i, contact in enumerate(expert_data['contacts']):
+                    print(f"🔄 Добавление контакта {i+1}: {contact.get('full_name', 'N/A')}")
+                    
+                    contact_id = self.add_contact(
+                        expert_id,
+                        contact.get('full_name', ''),
+                        position=contact.get('position', ''),
+                        phone=contact.get('phone', ''),
+                        email=contact.get('email', ''),
+                        is_primary=contact.get('is_primary', False)
+                    )
+                    
+                    if contact_id:
+                        print(f"✓ Контакт {i+1} добавлен с ID: {contact_id}")
+                    else:
+                        print(f"❌ Не удалось добавить контакт {i+1}")
+
+            # Добавляем специализации (виды работ)
+            specializations = expert_data.get('specializations')
+            if specializations:
+                if isinstance(specializations, str):
+                    specs = [s.strip() for s in specializations.split(',') if s.strip()]
+                else:
+                    specs = [str(s).strip() for s in specializations if str(s).strip()]
+                for spec in specs:
+                    self.add_specialization(expert_id, spec)
+            
+            return expert_id
+        except Exception as e:
+            print(f"❌ Ошибка при добавлении эксперта: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def get_expert_by_id(self, expert_id: int) -> dict | None:
         expert = self.db.fetch_one("SELECT * FROM experts WHERE id = ?", (expert_id,))
@@ -22,9 +103,147 @@ class ExpertsManager:
         expert_dict['specializations'] = self.get_specializations(expert_id)
         return expert_dict
 
-    def update_expert(self, expert_id: int, name: str):
-        query = "UPDATE experts SET name = ? WHERE id = ?"
-        self.db.execute(query, (name.strip(), expert_id))
+    def update_expert(self, expert_id: int, expert_data: dict) -> bool:
+        """Обновляет данные эксперта"""
+        try:
+            # Обновляем основную информацию
+            name = expert_data.get('name', '').strip()
+            if not name:
+                raise ValueError("Имя эксперта обязательно")
+            
+            query = "UPDATE experts SET name = ?, notes = ? WHERE id = ?"
+            self.db.execute(query, (name, expert_data.get('notes', '').strip(), expert_id))
+            
+            # Обновляем основной контакт
+            existing_contacts = self.get_contacts(expert_id)
+            primary_contact = None
+            
+            # Ищем существующий основной контакт
+            for contact in existing_contacts:
+                if contact.get('is_primary'):
+                    primary_contact = contact
+                    break
+            
+            if expert_data.get('primary_contact') or expert_data.get('primary_phone') or expert_data.get('primary_email'):
+                if primary_contact:
+                    # Обновляем существующий контакт
+                    self.update_contact(
+                        primary_contact['id'],
+                        expert_data.get('primary_contact', ''),
+                        phone=expert_data.get('primary_phone', ''),
+                        email=expert_data.get('primary_email', ''),
+                        is_primary=True
+                    )
+                else:
+                    # Создаем новый контакт
+                    self.add_contact(
+                        expert_id,
+                        expert_data.get('primary_contact', ''),
+                        phone=expert_data.get('primary_phone', ''),
+                        email=expert_data.get('primary_email', ''),
+                        is_primary=True
+                    )
+            
+            # Обновляем специализации
+            # Сначала удаляем все существующие
+            self.db.execute("DELETE FROM expert_specializations WHERE expert_id = ?", (expert_id,))
+            
+            # Добавляем новые
+            if expert_data.get('specializations'):
+                specs = [s.strip() for s in expert_data['specializations'].split(',') if s.strip()]
+                for spec in specs:
+                    self.add_specialization(expert_id, spec)
+            
+            return True
+        except Exception as e:
+            print(f"Ошибка при обновлении эксперта: {e}")
+            return False
+
+    def update_expert_with_contacts(self, expert_id: int, expert_data: dict) -> bool:
+        """Обновляет эксперта и список его контактных лиц (до 4)
+
+        expert_data ожидает:
+        - name: str
+        - notes: str
+        - contacts: list[dict] где dict может содержать:
+            id (optional), full_name, position, phone, email, is_primary
+        """
+        try:
+            name = (expert_data.get('name') or '').strip()
+            if not name:
+                raise ValueError("Название компании обязательно")
+
+            notes = (expert_data.get('notes') or '').strip()
+            self.db.execute(
+                "UPDATE experts SET name = ?, notes = ? WHERE id = ?",
+                (name, notes, expert_id)
+            )
+
+            incoming = expert_data.get('contacts') or []
+            if not isinstance(incoming, list):
+                incoming = []
+
+            # Ограничение 4 контакта
+            incoming = incoming[:4]
+
+            existing = self.get_contacts(expert_id)
+            existing_ids = {c.get('id') for c in existing if c.get('id') is not None}
+            incoming_ids = {c.get('id') for c in incoming if c.get('id') is not None}
+
+            # Удаляем контакты, которых больше нет
+            for contact_id in (existing_ids - incoming_ids):
+                self.delete_contact(contact_id)
+
+            # Сбрасываем primary, затем выставим заново
+            self.db.execute("UPDATE expert_contacts SET is_primary = 0 WHERE expert_id = ?", (expert_id,))
+
+            # Upsert контактов
+            for c in incoming:
+                contact_id = c.get('id')
+                full_name = (c.get('full_name') or '').strip()
+                if not full_name:
+                    continue
+
+                position = (c.get('position') or '').strip()
+                phone = (c.get('phone') or '').strip()
+                email = (c.get('email') or '').strip()
+                is_primary = bool(c.get('is_primary'))
+
+                if contact_id:
+                    self.update_contact(
+                        contact_id,
+                        full_name,
+                        position=position,
+                        phone=phone,
+                        email=email,
+                        is_primary=is_primary
+                    )
+                else:
+                    self.add_contact(
+                        expert_id,
+                        full_name,
+                        position=position,
+                        phone=phone,
+                        email=email,
+                        is_primary=is_primary
+                    )
+
+            # Обновляем специализации
+            self.db.execute("DELETE FROM expert_specializations WHERE expert_id = ?", (expert_id,))
+            specializations = expert_data.get('specializations')
+            if specializations:
+                if isinstance(specializations, str):
+                    specs = [s.strip() for s in specializations.split(',') if s.strip()]
+                else:
+                    specs = [str(s).strip() for s in specializations if str(s).strip()]
+                for spec in specs:
+                    self.add_specialization(expert_id, spec)
+
+            return True
+
+        except Exception as e:
+            print(f"Ошибка при обновлении эксперта с контактами: {e}")
+            return False
 
     def delete_expert(self, expert_id: int):
         self.db.execute("DELETE FROM experts WHERE id = ?", (expert_id,))
@@ -41,7 +260,9 @@ class ExpertsManager:
             INSERT INTO expert_contacts (expert_id, full_name, position, phone, email, is_primary)
             VALUES (?, ?, ?, ?, ?, ?)
         """
-        return self.db.execute(query, (expert_id, full_name.strip(), position.strip(), phone.strip(), email.strip(), int(is_primary)))
+        
+        params = (expert_id, full_name.strip(), position.strip(), phone.strip(), email.strip(), int(is_primary))
+        return self.db.execute(query, params)
 
     def get_contacts(self, expert_id: int) -> list[dict]:
         query = """

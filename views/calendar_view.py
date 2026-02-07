@@ -173,106 +173,23 @@ class CalendarView(BaseView):
         if self.on_date_click_callback:
             self.on_date_click_callback(day, month, year)
 
-    # ... (код класса CalendarView остается выше) ...
 
-    class CalendarDialog(tk.Toplevel):
-        """
-        Всплывающее окно выбора даты (без сторонних библиотек).
-        """
-
-        def __init__(self, parent, on_select):
-            super().__init__(parent)
-            self.on_select = on_select
-            self.title("Выберите дату")
-            self.geometry("300x300")
-            self.configure(bg='white')
-            self.resizable(False, False)
-
-            # Центрируем
-            try:
-                x = parent.winfo_rootx() + 50
-                y = parent.winfo_rooty() + 50
-                self.geometry(f"+{x}+{y}")
-            except:
-                pass
-
-            self.current_date = date.today()
-            self.year = self.current_date.year
-            self.month = self.current_date.month
-
-            self._setup_ui()
-            self._update_calendar()
-
-        def _setup_ui(self):
-            header = tk.Frame(self, bg='#333333', height=40)
-            header.pack(fill=tk.X)
-
-            tk.Button(header, text="<", command=self._prev, bg='#333333', fg='white', relief='flat').pack(side=tk.LEFT,
-                                                                                                          padx=10)
-            self.lbl_month = tk.Label(header, text="", font=("Arial", 12, "bold"), bg='#333333', fg='white')
-            self.lbl_month.pack(side=tk.LEFT, expand=True)
-            tk.Button(header, text=">", command=self._next, bg='#333333', fg='white', relief='flat').pack(side=tk.RIGHT,
-                                                                                                          padx=10)
-
-            self.grid_frame = tk.Frame(self, bg='white')
-            self.grid_frame.pack(expand=True, fill=tk.BOTH, padx=5, pady=5)
-
-        def _update_calendar(self):
-            for w in self.grid_frame.winfo_children(): w.destroy()
-
-            self.lbl_month.config(text=f"{calendar.month_name[self.month]} {self.year}")
-            days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-
-            for i, d in enumerate(days):
-                tk.Label(self.grid_frame, text=d, font=("Arial", 9, "bold"), bg='white',
-                         fg='red' if i >= 5 else 'black').grid(row=0, column=i, sticky='nsew')
-
-            cal = calendar.monthcalendar(self.year, self.month)
-            for r, week in enumerate(cal):
-                for c, day in enumerate(week):
-                    if day != 0:
-                        bg = "#4CAF50" if (
-                                    day == date.today().day and self.month == date.today().month and self.year == date.today().year) else "white"
-                        fg = "white" if bg == "#4CAF50" else ("red" if c >= 5 else "black")
-                        tk.Button(self.grid_frame, text=str(day), bg=bg, fg=fg, relief='flat',
-                                  command=lambda d=day: self._select(d)).grid(row=r + 1, column=c, sticky='nsew',
-                                                                              padx=1, pady=1)
-
-            for i in range(7): self.grid_frame.columnconfigure(i, weight=1)
-
-        def _prev(self):
-            self.month -= 1
-            if self.month < 1: self.month, self.year = 12, self.year - 1
-            self._update_calendar()
-
-        def _next(self):
-            self.month += 1
-            if self.month > 12: self.month, self.year = 1, self.year + 1
-            self._update_calendar()
-
-        def _select(self, day):
-            selected = date(self.year, self.month, day)
-            self.on_select(selected.isoformat())
-            self.destroy()
-
-
-# ... (здесь должен быть ваш старый код класса CalendarView) ...
-
-# --- ДОБАВИТЬ ОТСЮДА ---
 class CalendarDialog(tk.Toplevel):
     """
-    Всплывающее окно выбора даты.
-    Стиль управления аналогичен главной странице (Spinbox).
+    Улучшенный всплывающий диалог выбора даты.
+    Современный дизайн с навигацией и автоматическим обновлением.
     """
 
-    def __init__(self, parent, on_select):
+    def __init__(self, parent, title="Выберите дату"):
         super().__init__(parent)
-        self.on_select = on_select
-        self.title("Выберите дату")
-        self.geometry("350x320")  # Чуть шире, чтобы поместились спинбоксы
+        self.title(title)
+        self.geometry("350x320")
         self.configure(bg='white')
         self.resizable(False, False)
-
+        
+        # Результат выбора
+        self.selected_date = None
+        
         # Центрируем относительно родителя
         try:
             x = parent.winfo_rootx() + 50
@@ -282,113 +199,246 @@ class CalendarDialog(tk.Toplevel):
             pass
 
         self.current_date = date.today()
+        self.result = None
 
         self._setup_ui()
         self._update_calendar()
 
     def _setup_ui(self):
-        # --- ШАПКА (Управление) ---
-        header = tk.Frame(self, bg='white', pady=10)
-        header.pack(fill=tk.X)
+        """Создание интерфейса"""
+        # Шапка с навигацией
+        header = tk.Frame(self, bg='#f0f0f0', height=50)
+        header.pack(fill=tk.X, padx=10, pady=10)
+        header.pack_propagate(False)
 
-        # Функция-обертка для bind (принимает событие, но игнорирует его)
-        def auto_update(*args):
-            self._update_calendar()
+        # Навигация по месяцам
+        nav_frame = tk.Frame(header, bg='#f0f0f0')
+        nav_frame.pack(expand=True)
+
+        # Кнопки навигации
+        tk.Button(
+            nav_frame, 
+            text="◀", 
+            command=self._prev_month,
+            bg="#41a5be", 
+            fg="white", 
+            font=("Arial", 10, "bold"),
+            width=3,
+            relief="flat"
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Метка месяца и года
+        self.month_label = tk.Label(
+            nav_frame, 
+            text="", 
+            font=("Arial", 12, "bold"), 
+            bg='#f0f0f0', 
+            fg='#333'
+        )
+        self.month_label.pack(side=tk.LEFT, expand=True)
+
+        tk.Button(
+            nav_frame, 
+            text="▶", 
+            command=self._next_month,
+            bg="#41a5be", 
+            fg="white", 
+            font=("Arial", 10, "bold"),
+            width=3,
+            relief="flat"
+        ).pack(side=tk.RIGHT, padx=5)
+
+        # Быстрый выбор через спинбоксы
+        spin_frame = tk.Frame(self, bg='white')
+        spin_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
         # Месяц
-        tk.Label(header, text="Месяц:", bg="white", font=("Arial", 10)).pack(side=tk.LEFT, padx=(15, 5))
-
+        tk.Label(spin_frame, text="Месяц:", bg="white", font=("Arial", 10)).pack(side=tk.LEFT, padx=(0, 5))
+        
         self.month_var = tk.StringVar(value=self.current_date.month)
-        self.month_var.trace("w", auto_update)  # Отслеживаем изменение переменной
-
         self.spin_month = tk.Spinbox(
-            header,
+            spin_frame,
             from_=1, to=12,
             width=3,
             font=("Arial", 10),
             textvariable=self.month_var,
-            command=auto_update  # Вызывается при клике на стрелочки
+            command=self._update_calendar
         )
-        self.spin_month.pack(side=tk.LEFT)
-
-        # Привязываем нажатие Enter
-        self.spin_month.bind('<Return>', auto_update)
+        self.spin_month.pack(side=tk.LEFT, padx=(0, 15))
+        self.spin_month.bind('<Return>', lambda e: self._update_calendar())
 
         # Год
-        tk.Label(header, text="Год:", bg="white", font=("Arial", 10)).pack(side=tk.LEFT, padx=(15, 5))
-
+        tk.Label(spin_frame, text="Год:", bg="white", font=("Arial", 10)).pack(side=tk.LEFT, padx=(0, 5))
+        
         self.year_var = tk.StringVar(value=self.current_date.year)
-        self.year_var.trace("w", auto_update)
-
         self.spin_year = tk.Spinbox(
-            header,
+            spin_frame,
             from_=1900, to=2100,
             width=5,
             font=("Arial", 10),
             textvariable=self.year_var,
-            command=auto_update
+            command=self._update_calendar
         )
         self.spin_year.pack(side=tk.LEFT)
+        self.spin_year.bind('<Return>', lambda e: self._update_calendar())
 
-        self.spin_year.bind('<Return>', auto_update)
-
-        # --- СЕТКА КАЛЕНДАРЯ ---
+        # Сетка календаря
         self.grid_frame = tk.Frame(self, bg='white')
-        self.grid_frame.pack(expand=True, fill=tk.BOTH, padx=10, pady=5)
+        self.grid_frame.pack(expand=True, fill=tk.BOTH, padx=20, pady=(0, 10))
+
+        # Кнопки управления
+        btn_frame = tk.Frame(self, bg='#f0f0f0')
+        btn_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=10)
+
+        tk.Button(
+            btn_frame,
+            text="OK",
+            command=self._on_ok,
+            bg="#28a745",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            width=10
+        ).pack(side=tk.RIGHT, padx=5)
+
+        tk.Button(
+            btn_frame,
+            text="Отмена",
+            command=self.destroy,
+            bg="#6c757d",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            width=10
+        ).pack(side=tk.RIGHT, padx=5)
 
     def _update_calendar(self):
+        """Обновление сетки календаря"""
         # Очистка старой сетки
         for w in self.grid_frame.winfo_children():
             w.destroy()
 
         try:
-            m = int(self.spin_month.get())
-            y = int(self.spin_year.get())
+            m = int(self.month_var.get())
+            y = int(self.year_var.get())
         except ValueError:
-            return  # Если ввели ерунду, просто не обновляем
+            return  # Если ввели некорректные данные, просто не обновляем
+
+        # Обновляем заголовок
+        self.month_label.config(text=f"{calendar.month_name[m]} {y}")
 
         # Дни недели
         days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
         for i, d in enumerate(days):
-            color = 'red' if i >= 5 else 'black'
+            color = '#dc3545' if i >= 5 else '#333'  # Красный для выходных
             tk.Label(
                 self.grid_frame,
                 text=d,
-                font=("Arial", 9, "bold"),
+                font=("Arial", 10, "bold"),
                 bg='white',
-                fg=color
+                fg=color,
+                width=4,
+                height=2
             ).grid(row=0, column=i, sticky='nsew', pady=(0, 5))
 
-        # Числа
+        # Числа месяца
         cal = calendar.monthcalendar(y, m)
+        today = date.today()
+        
         for r, week in enumerate(cal):
             for c, day in enumerate(week):
                 if day != 0:
                     # Проверка на сегодня
-                    is_today = (day == date.today().day and m == date.today().month and y == date.today().year)
+                    is_today = (day == today.day and m == today.month and y == today.year)
+                    # Проверка на выбранную дату
+                    is_selected = (self.selected_date and 
+                                 day == self.selected_date.day and 
+                                 m == self.selected_date.month and 
+                                 y == self.selected_date.year)
 
-                    bg_color = "#4CAF50" if is_today else "white"
-                    fg_color = "white" if is_today else ("red" if c >= 5 else "black")
+                    # Цветовая схема
+                    if is_selected:
+                        bg_color = "#28a745"  # Зеленый для выбранной
+                        fg_color = "white"
+                        font_style = ("Arial", 10, "bold")
+                    elif is_today:
+                        bg_color = "#41a5be"
+                        fg_color = "white"
+                        font_style = ("Arial", 10, "bold")
+                    elif c >= 5:  # Выходные
+                        bg_color = "#f8f9fa"
+                        fg_color = "#dc3545"
+                        font_style = ("Arial", 10)
+                    else:  # Будни
+                        bg_color = "white"
+                        fg_color = "#333"
+                        font_style = ("Arial", 10)
 
                     btn = tk.Button(
                         self.grid_frame,
                         text=str(day),
                         bg=bg_color,
                         fg=fg_color,
-                        relief='flat',
-                        command=lambda d=day, month=m, year=y: self._select(d, month, year)
+                        font=font_style,
+                        relief="flat",
+                        activebackground="#e8f4f8",
+                        command=lambda d=day, month=m, year=y: self._select_date(d, month, year)
                     )
                     btn.grid(row=r + 1, column=c, sticky='nsew', padx=1, pady=1)
 
-        # Растягивание сетки
+        # Растягивание колонок
         for i in range(7):
             self.grid_frame.columnconfigure(i, weight=1)
 
-    def _select(self, day, month, year):
-        """Возврат выбранной даты"""
+    def _prev_month(self):
+        """Предыдущий месяц"""
+        month = int(self.month_var.get())
+        year = int(self.year_var.get())
+        
+        month -= 1
+        if month < 1:
+            month = 12
+            year -= 1
+            
+        self.month_var.set(month)
+        self.year_var.set(year)
+        self._update_calendar()
+
+    def _next_month(self):
+        """Следующий месяц"""
+        month = int(self.month_var.get())
+        year = int(self.year_var.get())
+        
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+            
+        self.month_var.set(month)
+        self.year_var.set(year)
+        self._update_calendar()
+
+    def _select_date(self, day, month, year):
+        """Выбор даты"""
         try:
-            selected = date(year, month, day)
-            self.on_select(selected.isoformat())
+            self.selected_date = date(year, month, day)
+            # Подсветка выбранной даты
+            self._update_calendar()
+            # Автоматически закрываем диалог после выбора даты
+            self.result = self.selected_date
             self.destroy()
         except ValueError:
-            pass  # Некорректная дата (например 31 февраля)
+            pass
+
+    def _on_ok(self):
+        """Подтверждение выбора"""
+        if self.selected_date:
+            self.result = self.selected_date
+        else:
+            # Если дата не выбрана, используем текущую
+            self.result = date(int(self.year_var.get()), int(self.month_var.get()), date.today().day)
+        self.destroy()
+
+    def show(self):
+        """Показать диалог и вернуть результат"""
+        self.grab_set()
+        self.wait_window()
+        return self.result
