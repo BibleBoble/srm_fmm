@@ -44,6 +44,9 @@ class TableViewTemplate(BaseView):
     def __init__(self, parent_frame, manager):
         super().__init__(parent_frame)
         self.manager = manager
+        # Восстановлено оригинальное поведение — публичный атрибут parent
+        self.parent = parent_frame
+
         self.search_var = tk.StringVar()
         self.search_job = None
         self.current_page = 1
@@ -214,6 +217,9 @@ class TableViewTemplate(BaseView):
         self.tree.tag_configure('oddrow', background=TableView.ROW_ODD)
         self.tree.tag_configure('selected', background=TableView.ROW_HOVER)
 
+        # Добавляем тег для основного (primary) — светло-зелёный фон
+        self.tree.tag_configure('primary', background="#d4edda")
+
         scrollbar = ttk.Scrollbar(self.table_container, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
 
@@ -312,7 +318,7 @@ class TableViewTemplate(BaseView):
         )
 
     def _perform_search(self):
-        """Выполняет поиск и сбрасывает на первую страницу"""
+        """Выполняет поиск и сбрасыет на первую страницу"""
         self.search_job = None
         self.current_page = 1
         self._refresh_data()
@@ -336,9 +342,15 @@ class TableViewTemplate(BaseView):
 
         # Заполнение
         for idx, item in enumerate(items):
-            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
+            # Используем хук _get_row_tags для получения кортежа тегов (наследники могут добавить 'primary' и т.д.)
+            try:
+                tags = tuple(self._get_row_tags(item, idx))
+                if not tags:
+                    tags = ('evenrow',)  # fallback
+            except Exception:
+                tags = ('evenrow',) if idx % 2 == 0 else ('oddrow',)
             values = self._item_to_row_values(item)
-            self.tree.insert("", tk.END, values=values, tags=(tag,))
+            self.tree.insert("", tk.END, values=values, tags=tags)
 
         # Обновление UI
         total_pages = max(1, (total + self.PAGE_SIZE - 1) // self.PAGE_SIZE)
@@ -400,17 +412,40 @@ class TableViewTemplate(BaseView):
         self._hover_row = None
 
     def _on_tree_leave(self, event):
+        # корректно удаляем только тег 'selected', не затирая другие теги
         if hasattr(self, '_hover_row') and self._hover_row:
-            self.tree.item(self._hover_row, tags=(self.tree.item(self._hover_row)['tags'][0],))
+            try:
+                tags = list(self.tree.item(self._hover_row).get('tags', ()))
+                if 'selected' in tags:
+                    tags.remove('selected')
+                self.tree.item(self._hover_row, tags=tuple(tags))
+            except Exception:
+                pass
             self._hover_row = None
 
     def _on_tree_motion(self, event):
         item = self.tree.identify_row(event.y)
+        # Убираем 'selected' с предыдущей строки корректно
         if hasattr(self, '_hover_row') and self._hover_row and self._hover_row != item:
-            self.tree.item(self._hover_row, tags=(self.tree.item(self._hover_row)['tags'][0],))
+            try:
+                prev_tags = list(self.tree.item(self._hover_row).get('tags', ()))
+                if 'selected' in prev_tags:
+                    prev_tags.remove('selected')
+                self.tree.item(self._hover_row, tags=tuple(prev_tags))
+            except Exception:
+                pass
+
         if item:
             self._hover_row = item
-            self.tree.item(item, tags=('selected',))
+            try:
+                cur_tags = list(self.tree.item(item).get('tags', ()))
+                if 'selected' not in cur_tags:
+                    # добавляем selected, сохраняя существующие теги (например 'primary')
+                    cur_tags.append('selected')
+                    self.tree.item(item, tags=tuple(cur_tags))
+            except Exception:
+                # fallback: просто ставим selected
+                self.tree.item(item, tags=('selected',))
 
     # --- Абстрактные методы для переопределения ---
 
@@ -432,6 +467,15 @@ class TableViewTemplate(BaseView):
     def _on_row_double_click(self, item_id):
         """Обработчик двойного клика по строке (открытие карточки)"""
         pass
+
+    def _get_row_tags(self, item, idx):
+        """
+        Хук: вернуть последовательность тегов для строки.
+        По умолчанию — простое чередование 'evenrow'/'oddrow'.
+        Наследники (например ClientsView) могут переопределить и добавить 'primary'.
+        """
+        base = 'evenrow' if idx % 2 == 0 else 'oddrow'
+        return (base,)
 
     # --- Универсальные методы для диалогов ---
     

@@ -1,672 +1,1067 @@
+# -*- coding: utf-8 -*-
 """
-Представление списка клиентов
+Представление раздела "Клиенты" на базе TableViewTemplate
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-from views.base_view import BaseView
-from datetime import date
+from views.table_view_template import TableViewTemplate
+from views.calendar_view import CalendarDialog
 from utils.helpers import show_message, show_confirmation
+from utils.constants import TableView, Sizes
+from datetime import date, datetime
 
 
-class ClientsView(BaseView):
-    """
-    Класс для отображения списка клиентов
-    """
-
-    def __init__(self, parent_frame, clients_mgr, contact_persons_mgr, contact_emails_mgr, interactions_mgr, tasks_mgr=None):
-        super().__init__(parent_frame)
-        self.clients_mgr = clients_mgr
-        self.contact_persons_mgr = contact_persons_mgr
-        self.contact_emails_mgr = contact_emails_mgr
-        self.interactions_mgr = interactions_mgr
+class ClientTasksTable:
+    """Таблица задач для конкретного клиента"""
+    
+    def __init__(self, parent, client_id, tasks_mgr, clients_mgr):
+        self.parent = parent
+        self.client_id = client_id
         self.tasks_mgr = tasks_mgr
-
-        # Инициализация атрибутов для поиска
-        self.search_job = None
-        self.search_delay = 300  # 300 мс задержка
-
-        if contact_emails_mgr is None:
-            print("Внимание: contact_emails_mgr не передан")
-
-    def _configure_columns(self, event=None):
-        """Динамически настраивает ширину колонок"""
-        # Получаем ширину таблицы
-        width = self.tree.winfo_width()
-
-        # Вычитаем ширину фиксированных колонок
-        fixed_width = 50 + 100  # ID + Задачи
-        remaining_width = width - fixed_width
-
-        # Распределяем оставшуюся ширину между растягиваемыми колонками
-        stretchable_columns = ["Компания", "Контактное лицо", "Должность", "Телефон", "Адрес"]
-        column_width = max(150, remaining_width // len(stretchable_columns))
-
-        for col in stretchable_columns:
-            self.tree.column(col, width=column_width, anchor='w', stretch=True)
-
-    def _create_table_widgets(self):
-        """Создаёт виджеты таблицы со стилизацией под старый дизайн"""
-        self.table_container = tk.Frame(self.parent_frame, bg='white')
-
-        # Создаём Treeview
-        columns = ("ID", "Компания", "Контактное лицо", "Должность", "Телефон", "Адрес", "Задачи")
-        self.tree = ttk.Treeview(
-            self.table_container,
-            columns=columns,
-            show="headings",  # Убираем "дерево" слева
-            height=25,
-            selectmode="browse"
-        )
-        # Убираем стандартные границы и полосы выделения
-        style = ttk.Style()
-        style.theme_use("clam")  # Более гибкая тема для кастомизации
-
-        # Настраиваем стиль для Treeview
-        style.configure("Treeview",
-                        background="white",
-                        foreground="#333",
-                        rowheight=40,  # Высота строки как в старом дизайне
-                        fieldbackground="white",
-                        borderwidth=0,
-                        font=("Arial", 10))
-
-        style.configure("Treeview.Heading",
-                        background="#333333",  # Тёмный фон заголовков
-                        foreground="white",
-                        font=("Arial", 10, "bold"),
-                        padding=(10, 8),  # Отступы как в старом дизайне
-                        borderwidth=1,
-                        relief="flat")
-
-        style.map("Treeview.Heading",
-                  background=[("active", "#444444")])
-
-        # Настройка заголовков
-        for col in columns:
-            self.tree.heading(col, text=col)
-            # Настраиваем выравнивание и растяжение
-            if col == "ID":
-                self.tree.column(col, width=50, anchor='center', stretch=False)
-            elif col == "Задачи":
-                self.tree.column(col, width=100, anchor='center', stretch=False)
-            else:  # Все остальные колонки растягиваем
-                self.tree.column(col, width=150, anchor='w', stretch=True)  # stretch=True
-
-        # Убираем стандартные разделители
-        self.tree.configure(style="Treeview")
-
-        # ✅ ВОССТАНОВЛЕННЫЙ МЕТОД
-        self.tree.bind('<Double-Button-1>', self._on_table_double_click)
-        self.tree.bind('<Button-1>', self._on_table_single_click)
-
-        # Создаём свои теги для строк
-        self.tree.tag_configure('evenrow', background='#f8f9fa')
-        self.tree.tag_configure('oddrow', background='white')
-        self.tree.tag_configure('selected', background='#e8f4f8')  # Цвет при наведении
-
-        # Скроллбар с кастомизацией
-        scrollbar = ttk.Scrollbar(
-            self.table_container,
-            orient="vertical",
-            command=self.tree.yview
-        )
-        self.tree.configure(yscrollcommand=scrollbar.set)
-
-        # Размещение
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Обработчики событий для hover-эффекта
-        self.tree.bind('<Enter>', self._on_tree_enter)
-        self.tree.bind('<Leave>', self._on_tree_leave)
-        self.tree.bind('<Motion>', self._on_tree_motion)
-
-    def _on_table_double_click(self, event):
-        """Обработка двойного клика по строке таблицы (открытие карточки)"""
-        try:
-            item = self.tree.identify_row(event.y)
-            if not item:
-                return
-
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0:
-                client_id = int(values[0])
-                self._open_client_card_by_id(client_id)
-
-        except Exception as e:
-            print(f"Ошибка при двойном клике: {e}")
-
-    def _on_table_single_click(self, event):
-        """Обработка обычного клика по таблице (для кнопки 'Задачи')"""
-        try:
-            # Определяем, куда кликнули
-            column = self.tree.identify_column(event.x)
-            item = self.tree.identify_row(event.y)
-
-            if not item or not column:
-                return
-
-            # Только если кликнули по колонке "Задачи" (#7)
-            if column == '#7':
-                # Получаем ID клиента
-                values = self.tree.item(item, 'values')
-                if values and len(values) > 0:
-                    client_id = int(values[0])
-                    self._create_task_for_client(client_id)
-
-        except Exception as e:
-            print(f"Ошибка при обработке клика: {e}")
-
-    def clear(self):
-        """Очищает раздел клиентов"""
-        # Получаем все виджеты в родительском фрейме
-        for widget in self.parent_frame.winfo_children():
-            widget.destroy()
-
-        # Сбрасываем атрибуты, которые будут созданы заново в show()
-        self.table_container = None
+        self.clients_mgr = clients_mgr
         self.tree = None
-
-    def show(self):
-        """Отображает раздел 'Клиенты'"""
-        # Очищаем всё
-        self.clear()
-
-        # Создаём таблицу если её нет
-        if not hasattr(self, 'table_container') or self.table_container is None:
-            self._create_table_widgets()
-
-        # Верхняя панель с поиском и кнопкой добавления
-        top_panel = tk.Frame(self.parent_frame, bg='#f0f0f0', height=70)
-        top_panel.pack(fill=tk.X)
-        top_panel.pack_propagate(False)
-
-        # Поиск слева/по центру
-        search_container = tk.Frame(top_panel, bg='#f0f0f0')
-        search_container.pack(side=tk.LEFT, expand=True, padx=20, pady=15)
-
-        self.info_label = tk.Label(
-            search_container,
-            text=f"Клиентов: {self.clients_mgr.get_count()}",
-            font=("Arial", 11, "bold"),
-            bg='#f0f0f0',
-            fg='#333',
-            width=15
-        )
-        self.info_label.pack(side=tk.LEFT, padx=(0, 0))
-
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Создает интерфейс таблицы"""
+        # Заголовок
+        header_frame = tk.Frame(self.parent, bg='#f8f9fa')
+        header_frame.pack(fill=tk.X, padx=15, pady=(20, 10))
+        
         tk.Label(
-            search_container,
-            text="🔍",
-            font=("Arial", 14),
-            bg='#f0f0f0',
+            header_frame,
+            text="Задачи клиента",
+            font=("Arial", 16, "bold"),
+            bg='#f8f9fa',
             fg='#333'
-        ).pack(side=tk.LEFT, padx=5)
-
-        self.search_var = tk.StringVar()
-        self.search_var.trace('w', self._on_search_change)
-
-        search_entry = tk.Entry(
-            search_container,
-            textvariable=self.search_var,
-            font=("Arial", 12),
-            width=50,
-            relief="solid",
-            borderwidth=1,
-            bg='white',
-            fg='#333'
-        )
-
-        search_entry.pack(side=tk.LEFT, padx=5, ipady=8)
-
+        ).pack(side=tk.LEFT)
+        
+        # Контейнер для элементов справа
+        right_container = tk.Frame(header_frame, bg='#f8f9fa')
+        right_container.pack(side=tk.RIGHT)
+        
+        # Сортировка
         tk.Label(
-            search_container,
-            text="Поиск по компании или контактному лицу",
+            right_container,
+            text="Сортировка:",
             font=("Arial", 10),
-            bg='#f0f0f0',
+            bg='#f8f9fa',
             fg='#666'
-        ).pack(side=tk.LEFT, padx=10)
-
-        # Кнопка добавления справа
-        tk.Button(
-            top_panel,
-            text="+ Добавить клиента",
-            command=self._show_add_client_dialog,
-            bg="#41a5be",
-            fg="black",
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.sort_var = tk.StringVar(value="Активные")
+        sort_options = [
+            "Все",
+            "Активные", 
+            "Выполненные",
+           ]
+        
+        sort_combo = ttk.Combobox(
+            right_container,
+            textvariable=self.sort_var,
+            values=sort_options,
+            state="readonly",
+            width=20,
+            font=("Arial", 9)
+        )
+        sort_combo.pack(side=tk.LEFT, padx=(0, 10))
+        sort_combo.bind("<<ComboboxSelected>>", self._on_sort_change)
+        
+        # Кнопка добавления задачи
+        add_btn = tk.Button(
+            right_container,
+            text="+ Добавить задачу",
+            command=self._add_task,
+            bg="#28a745",
+            fg="white",
             font=("Arial", 11, "bold"),
             relief="flat",
-            padx=20,
-            pady=10,
             cursor="hand2"
-        ).pack(side=tk.RIGHT, padx=20, pady=15)
-
-        # Показываем таблицу
-        self.table_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 0))
-
-        # Заполняем таблицу данными
-        self._update_table_data()
-
-        # Привязываем изменение размера
-        self.tree.bind('<Configure>', self._configure_columns)
-
-    def _update_table_data(self, search_query=None):
-        """Обновляет данные в таблице Treeview"""
+        )
+        add_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Создаем таблицу
+        self._create_table()
+        
+        # Загружаем данные
+        self._load_tasks()
+    
+    def _create_table(self):
+        """Создает Treeview таблицу"""
+        # Фрейм для таблицы с прокруткой
+        table_frame = tk.Frame(self.parent)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 20))
+        
+        # Создаем Treeview
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=("ID", "Статус", "Название", "Приоритет", "Срок"),
+            show="headings",
+            selectmode="browse"
+        )
+        
+        # Настройка колонок
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("Статус", text="Статус")
+        self.tree.heading("Название", text="Название")
+        self.tree.heading("Приоритет", text="Приоритет")
+        self.tree.heading("Срок", text="Срок")
+        
+        # Ширина колонок
+        self.tree.column("ID", width=50, minwidth=50)
+        self.tree.column("Статус", width=100, minwidth=80)
+        self.tree.column("Название", width=200, minwidth=150)
+        self.tree.column("Приоритет", width=100, minwidth=80)
+        self.tree.column("Срок", width=100, minwidth=80)
+        
+        # Прокрутка
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Размещение
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Обработчики
+        self.tree.bind('<Double-1>', self._on_double_click)
+        
+        # Стиль для основного контакта
+        self._setup_tag_styles()
+    
+    def _setup_tag_styles(self):
+        """Настраивает стили для разных типов контактов"""
+        style = ttk.Style()
+        
+        # Исправление для tag_configure в Windows
+        def fixed_map(option):
+            return [elm for elm in style.map('Treeview', query_opt=option) 
+                   if elm[:2] != ('!disabled', '!selected')]
+        
+        style.map('Treeview', foreground=fixed_map('foreground'), 
+                  background=fixed_map('background'))
+        
+        # Выделяем основной контакт зеленым цветом как в таблице клиентов
+        self.tree.tag_configure("primary", background="#d4edda")
+    
+    def _apply_sorting(self, tasks, sort_option):
+        """Применяет сортировку и фильтрацию к задачам"""
+        try:
+            # Сначала применяем фильтрацию
+            if sort_option == "Активные":
+                tasks = [task for task in tasks if self._get_status(task) == 'Активная']
+            elif sort_option == "Выполненные":
+                tasks = [task for task in tasks if self._get_status(task) == 'Выполнена']
+            elif sort_option == "Все":
+                pass  # Показываем все задачи
+            else:
+                # Применяем сортировку для других опций
+                if sort_option == "По сроку (ближайшие)":
+                    tasks = sorted(tasks, key=lambda t: self._get_due_date(t) or datetime.max)
+                elif sort_option == "По сроку (дальние)":
+                    tasks = sorted(tasks, key=lambda t: self._get_due_date(t) or datetime.min, reverse=True)
+                elif sort_option == "По названию (А-Я)":
+                    tasks = sorted(tasks, key=lambda t: self._get_title(t).lower())
+                elif sort_option == "По названию (Я-А)":
+                    tasks = sorted(tasks, key=lambda t: self._get_title(t).lower(), reverse=True)
+                elif sort_option == "По приоритету (высокий→низкий)":
+                    priority_order = {'Высокий': 1, 'Средний': 2, 'Низкий': 3}
+                    tasks = sorted(tasks, key=lambda t: priority_order.get(self._get_priority(t), 4))
+                elif sort_option == "По приоритету (низкий→высокий)":
+                    priority_order = {'Высокий': 3, 'Средний': 2, 'Низкий': 1}
+                    tasks = sorted(tasks, key=lambda t: priority_order.get(self._get_priority(t), 4))
+            
+            # По умолчанию для "Активные" и "Выполненные" сортируем по сроку
+            if sort_option in ["Активные", "Выполненные", "Все"]:
+                tasks = sorted(tasks, key=lambda t: self._get_due_date(t) or datetime.max)
+            
+            return tasks
+        except:
+            return tasks
+    
+    def _get_title(self, task):
+        """Получает название задачи"""
+        return task.title if hasattr(task, 'title') else task.get('title', '')
+    
+    def _get_status(self, task):
+        """Получает статус задачи"""
+        status = task.status if hasattr(task, 'status') else task.get('status', 'Активная')
+        # Преобразуем старые статусы в новые
+        if status in ['Новая', 'В работе', 'Отложена']:
+            return 'Активная'
+        elif status == 'Выполнена':
+            return 'Выполнена'
+        else:
+            return 'Активная'  # По умолчанию
+    
+    def _get_priority(self, task):
+        """Получает приоритет задачи"""
+        return task.priority if hasattr(task, 'priority') else task.get('priority', '')
+    
+    def _get_due_date(self, task):
+        """Получает срок выполнения задачи"""
+        due_date = task.due_date if hasattr(task, 'due_date') else task.get('due_date', None)
+        if due_date:
+            if isinstance(due_date, str):
+                try:
+                    # Пробуем разные форматы даты
+                    for fmt in ["%d.%m.%Y", "%Y-%m-%d", "%d.%m.%Y %H:%M:%S"]:
+                        try:
+                            return datetime.strptime(due_date, fmt)
+                        except:
+                            continue
+                    return None
+                except:
+                    return None
+            return due_date
+        return None
+    
+    def _on_sort_change(self, event=None):
+        """Обработчик изменения сортировки"""
+        self._load_tasks()
+    
+    def _load_tasks(self):
+        """Загружает задачи клиента в таблицу"""
+        # Очищаем таблицу
         for item in self.tree.get_children():
             self.tree.delete(item)
-
-        # Получаем данные
-        if search_query:
-            clients = self.clients_mgr.search(search_query)
-        else:
-            clients = self.clients_mgr.get_all()
-
-        # Единообразное преобразование в словари
-        for idx, client in enumerate(clients):
-            tag = 'evenrow' if idx % 2 == 0 else 'oddrow'
-
-            # Преобразуем client в dict если нужно
-            if not isinstance(client, dict):
-                try:
-                    client = dict(client)
-                except:
-                    client = {}
-
-            values = (
-                client.get('id', ''),
-                client.get('company', '—'),
-                client.get('primary_contact', '—'),
-                client.get('primary_position', '—'),
-                client.get('primary_phone', '—'),
-                client.get('address', '—'),
-                "➕ Задача"
-            )
-
-            self.tree.insert("", tk.END, values=values, tags=(tag,))
-
-    def _on_search_change(self, *args):
-        """Обработчик изменения поискового запроса с дебаунсингом"""
-        # Отменяем предыдущую отложенную задачу, если она есть
-        if self.search_job:
-            self.parent_frame.after_cancel(self.search_job)
-
-        # Создаем новую отложенную задачу
-        self.search_job = self.parent_frame.after(
-            self.search_delay,  # Задержка
-            self._perform_search  # Метод, который вызовется после задержки
-        )
-
-    def _perform_search(self):
-        """Выполняет фактический поиск после задержки"""
-        self.search_job = None
-        search_query = self.search_var.get().strip()
-
-        # Проверяем, что таблица существует
-        if hasattr(self, 'tree') and self.tree:
-            self._update_table_data(search_query)
-
-    def _on_row_enter_grid(self, row, widgets):
-        """Подсветка строки при наведении (grid версия)"""
-        for widget in widgets:
-            widget.config(bg='#e8f4f8')
-
-    def _on_row_leave_grid(self, row, widgets, original_bg):
-        """Снятие подсветки (grid версия)"""
-        for widget in widgets:
-            widget.config(bg=original_bg)
-
-    def _open_task_card(self, task_id):
-        """Открыть карточку задачи"""
+        
+        if not self.tasks_mgr:
+            return
+        
         try:
-            if not self.tasks_mgr:
-                from tkinter import messagebox
-                messagebox.showerror("Ошибка", "Менеджер задач не инициализирован")
-                return
+            # Получаем задачи клиента
+            tasks = self.tasks_mgr.get_by_client(self.client_id)
+            
+            # Применяем сортировку
+            sort_option = self.sort_var.get()
+            tasks = self._apply_sorting(tasks, sort_option)
+            
+            for task in tasks:
+                task_id = task.id if hasattr(task, 'id') else task.get('id', '')
+                title = task.title if hasattr(task, 'title') else task.get('title', '')
+                status = task.status if hasattr(task, 'status') else task.get('status', 'Новая')
+                priority = task.priority if hasattr(task, 'priority') else task.get('priority', '')
+                due_date = task.due_date if hasattr(task, 'due_date') else task.get('due_date', '')
+                
+                # Форматируем дату
+                due_date_str = ""
+                if due_date:
+                    try:
+                        if isinstance(due_date, str):
+                            due_date_str = due_date
+                        else:
+                            due_date_str = due_date.strftime("%d.%m.%Y")
+                    except:
+                        due_date_str = str(due_date)
+                
+                # Иконки приоритета
+                priority_icons = {'Высокий': '🔴', 'Средний': '🟡', 'Низкий': '🟢'}
+                priority_str = f"{priority_icons.get(priority, '')} {priority}" if priority else ""
+                
+                # Добавляем в таблицу
+                self.tree.insert(
+                    "", 
+                    "end",
+                    values=(task_id, status, title, priority_str, due_date_str),
+                    tags=(status,)
+                )
+        
+        except Exception as e:
+            print(f"Ошибка при загрузке задач: {e}")
+    
+    def _on_double_click(self, event):
+        """Обработчик двойного клика - открытие диалога редактирования"""
+        selection = self.tree.selection()
+        if selection:
+            item = selection[0]
+            values = self.tree.item(item, "values")
+            if values:
+                task_id = values[0]
+                # Открываем диалог редактирования задачи
+                self._edit_task(task_id)
+    
+    def _on_single_click(self, event):
+        """Обработчик одинарного клика на статус"""
+        # Определяем колонку и элемент
+        region = self.tree.identify_region(event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            item = self.tree.identify_row(event.y)
+            
+            if column == "#1" and item:  # Колонка статуса
+                values = self.tree.item(item, "values")
+                if values:
+                    task_id = values[0]
+                    current_status = values[1]
+                    # Меняем статус
+                    self._toggle_status(item, task_id, current_status)
+    
+    def _toggle_status(self, item, task_id, current_status):
+        """Переключает статус задачи"""
+        # Переключаем между двумя статусами
+        next_status = "Выполнена" if current_status == "Активная" else "Активная"
+        
+        try:
+            # Обновляем в базе данных
+            is_completed = (next_status == "Выполнена")
+            self.tasks_mgr.update_status(task_id, is_completed)
+            
+            # Обновляем в таблице
+            values = list(self.tree.item(item, "values"))
+            values[1] = next_status
+            self.tree.item(item, values=values, tags=(next_status,))
+            
+        except Exception as e:
+            print(f"Ошибка при обновлении статуса: {e}")
+    
+    def _add_task(self):
+        """Добавляет новую задачу для клиента"""
+        self._create_task_for_client(self.client_id)
+    
+    def _create_task_for_client(self, client_id):
+        """Создает задачу для клиента"""
+        try:
+            task_window = tk.Toplevel(self.parent)
+            task_window.title("➕ Новая задача")
+            task_window.geometry("600x550")
+            task_window.configure(bg='white')
+            task_window.resizable(False, False)
+            
+            # Делаем окно модальным и поверх родительского
+            task_window.transient(self.parent.winfo_toplevel())
+            task_window.grab_set()
+            task_window.focus_set()
 
-            # Получаем данные задачи
+            # Основная информация
+            main_frame = tk.Frame(task_window, bg='white')
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+            # Название
+            tk.Label(main_frame, text="📋 Основная информация", font=("Arial", 12, "bold"), bg='white', fg='#333').pack(anchor='w', pady=(0, 10))
+            
+            tk.Label(main_frame, text="Название задачи *", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
+            title_entry = tk.Entry(main_frame, font=("Arial", 11), width=50, relief="solid", borderwidth=1)
+            title_entry.pack(fill=tk.X, pady=(5, 15))
+
+            # Описание
+            tk.Label(main_frame, text="Описание", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
+            desc_text = tk.Text(main_frame, font=("Arial", 11), height=4, width=50, relief="solid", borderwidth=1)
+            desc_text.pack(fill=tk.X, pady=(5, 15))
+
+            # Клиент
+            tk.Label(main_frame, text="Клиент", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
+            client_frame = tk.Frame(main_frame, bg='white')
+            client_frame.pack(fill=tk.X, pady=(5, 15))
+            
+            # Получаем информацию о клиенте
+            client_info = self.clients_mgr.get_by_id(client_id)
+            client_name = client_info.get('company', 'Без названия') if client_info else 'Неизвестный клиент'
+            
+            client_var = tk.StringVar(value=client_name)
+            client_entry = tk.Entry(client_frame, textvariable=client_var, font=("Arial", 11), relief="solid", borderwidth=1)
+            client_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            client_entry.config(state='readonly')  # Делаем поле только для чтения
+
+            # Дополнительные параметры
+            tk.Label(main_frame, text="⚙ Дополнительные параметры", font=("Arial", 12, "bold"), bg='white', fg='#333').pack(anchor='w', pady=(0, 10))
+            
+            # Приоритет
+            tk.Label(main_frame, text="Приоритет", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
+            priority_var = tk.StringVar(value="Средний")
+            priority_combo = ttk.Combobox(main_frame, textvariable=priority_var,
+                                        values=["Низкий", "Средний", "Высокий"],
+                                        state="readonly", width=20)
+            priority_combo.pack(fill=tk.X, pady=(5, 15))
+
+            # Срок выполнения
+            tk.Label(main_frame, text="Срок выполнения", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
+            date_frame = tk.Frame(main_frame, bg='white')
+            date_frame.pack(fill=tk.X, pady=(5, 15))
+            
+            due_date_var = tk.StringVar(value=datetime.now().strftime("%d.%m.%Y"))
+            due_date_entry = tk.Entry(date_frame, textvariable=due_date_var, font=("Arial", 11), relief="solid", borderwidth=1)
+            due_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            def show_calendar():
+                """Показать календарь для выбора даты"""
+                cal_dialog = CalendarDialog(task_window, "Выберите срок выполнения")
+                selected_date = cal_dialog.show()
+                if selected_date:
+                    due_date_var.set(selected_date.strftime("%d.%m.%Y"))
+            
+            tk.Button(
+                date_frame,
+                text="📅",
+                command=show_calendar,
+                bg="#41a5be",
+                fg="white",
+                font=("Arial", 10),
+                relief="flat",
+                cursor="hand2"
+            ).pack(side=tk.RIGHT, padx=(5, 0))
+
+            # Кнопки
+            buttons_frame = tk.Frame(main_frame, bg='white')
+            buttons_frame.pack(fill=tk.X, pady=(20, 0))
+
+            def save_task():
+                title = title_entry.get().strip()
+                if not title:
+                    from tkinter import messagebox
+                    messagebox.showerror("Ошибка", "Укажите название задачи")
+                    return
+
+                description = desc_text.get('1.0', tk.END).strip()
+                priority = priority_var.get()
+                due_date = due_date_var.get().strip()
+                
+                # Создаем задачу через менеджер
+                self.tasks_mgr.add(
+                    title=title,
+                    description=description,
+                    client_id=client_id,
+                    priority=priority,
+                    due_date=due_date
+                )
+                
+                task_window.destroy()
+                
+                # Обновляем таблицу
+                self._load_tasks()
+                
+                # Также обновляем вкладку задач в карточке клиента
+                self._refresh_tasks_tab()
+
+            tk.Button(buttons_frame, text="Сохранить", command=save_task, 
+                     bg="#28a745", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Button(buttons_frame, text="Отмена", command=task_window.destroy,
+                     bg="#6c757d", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT)
+
+            title_entry.focus_set()
+
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка", f"Не удалось создать задачу: {e}")
+    
+    def _edit_task(self, task_id):
+        """Диалог редактирования задачи"""
+        try:
             task = self.tasks_mgr.get_by_id(task_id)
             if not task:
                 from tkinter import messagebox
                 messagebox.showerror("Ошибка", f"Задача с ID {task_id} не найдена")
                 return
 
-            # Преобразуем в словарь для удобства
-            try:
-                # Обрабатываем sqlite3.Row
-                if hasattr(task, 'keys'):
-                    # Это sqlite3.Row или подобный объект
-                    task_data = {}
-                    for key in task.keys():
-                        task_data[key] = task[key]
-                elif hasattr(task, '__dict__'):
-                    task_data = task.__dict__
-                elif hasattr(task, '_asdict'):
-                    task_data = task._asdict()
-                elif isinstance(task, dict):
-                    task_data = task
-                else:
-                    # Пробуем получить атрибуты по одному
-                    task_data = {}
-                    attrs_to_try = ['id', 'title', 'description', 'status', 'priority',
-                                    'due_date', 'created_at', 'client_id']
-                    for attr in attrs_to_try:
-                        try:
-                            # Пробуем доступ через getattr
-                            if hasattr(task, attr):
-                                task_data[attr] = getattr(task, attr)
-                            # Пробуем доступ по индексу/ключу
-                            elif hasattr(task, '__getitem__'):
-                                try:
-                                    task_data[attr] = task[attr]
-                                except (KeyError, IndexError):
-                                    pass
-                        except:
-                            pass
-            except Exception as e:
-                print(f"Ошибка преобразования данных задачи: {e}")
-                task_data = {'id': task_id, 'title': 'Задача'}
+            dialog = tk.Toplevel(self.parent)
+            dialog.title(f"✏️ Редактирование: {task.title}")
+            dialog.geometry("500x450")  # Увеличили высоту с 400 до 450
+            dialog.configure(bg='white')
+            dialog.resizable(False, False)
+            
+            # Делаем окно модальным и поверх родительского
+            dialog.transient(self.parent.winfo_toplevel())
+            dialog.grab_set()
+            dialog.focus_set()
 
-            # Получаем данные клиента для отображения
-            client_data = {}
-            if task_data.get('client_id'):
-                try:
-                    client = self.clients_mgr.get_by_id(task_data['client_id'])
-                    if client:
-                        if hasattr(client, 'keys'):
-                            # sqlite3.Row
-                            client_data = {}
-                            for key in client.keys():
-                                client_data[key] = client[key]
-                        elif hasattr(client, '__dict__'):
-                            client_data = client.__dict__
-                        elif hasattr(client, '_asdict'):
-                            client_data = client._asdict()
-                        elif isinstance(client, dict):
-                            client_data = client
-                        else:
-                            # Пробуем получить атрибуты
-                            client_data = {}
-                            for attr in ['id', 'company']:
-                                if hasattr(client, attr):
-                                    client_data[attr] = getattr(client, attr)
-                except Exception as e:
-                    print(f"Ошибка получения данных клиента: {e}")
+            # Основная информация
+            main_frame = tk.Frame(dialog, bg='white')
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-            # Создаем окно карточки задачи
-            task_window = tk.Toplevel(self.parent_frame)
-            task_window.title(f"Задача: {task_data.get('title', 'Без названия')}")
-            task_window.geometry("700x600")
-            task_window.configure(bg='white')
+            # Название
+            tk.Label(main_frame, text="Название задачи:", font=("Arial", 11, "bold"), bg='white').pack(anchor='w')
+            title_entry = tk.Entry(main_frame, font=("Arial", 11), width=50)
+            title_entry.pack(fill=tk.X, pady=(5, 15))
+            title_entry.insert(0, task.title)
 
-            # Заголовок
-            header = tk.Frame(task_window, bg='#333333', height=60)
-            header.pack(fill=tk.X)
-            header.pack_propagate(False)
+            # Описание
+            tk.Label(main_frame, text="Описание:", font=("Arial", 11, "bold"), bg='white').pack(anchor='w')
+            desc_text = tk.Text(main_frame, font=("Arial", 11), height=6, width=50)
+            desc_text.pack(fill=tk.X, pady=(5, 15))
+            if task.description:
+                desc_text.insert('1.0', task.description)
 
-            title_text = task_data.get('title', 'Задача')
-            tk.Label(
-                header,
-                text=f"📋 {title_text}",
-                font=("Arial", 18, "bold"),
-                fg="white",
-                bg='#333333'
-            ).pack(side=tk.LEFT, padx=20, pady=15)
+            # Статус и приоритет
+            params_frame = tk.Frame(main_frame, bg='white')
+            params_frame.pack(fill=tk.X, pady=(0, 15))
 
-            # ID задачи
-            tk.Label(
-                header,
-                text=f"ID: {task_id}",
-                font=("Arial", 12),
-                fg="#41a5be",
-                bg='#333333'
-            ).pack(side=tk.RIGHT, padx=20, pady=15)
-
-            # Основной контейнер с прокруткой
-            main_container = tk.Frame(task_window, bg='white')
-            main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-            # Информация о задаче
-            info_frame = tk.Frame(main_container, bg='white')
-            info_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Статус задачи
-            tk.Label(
-                info_frame,
-                text="Статус:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=0, column=0, sticky='w', pady=10)
-
-            status_colors = {
-                'Новая': '#17a2b8',
-                'В работе': '#007bff',
-                'Выполнена': '#28a745',
-                'Отложена': '#6c757d',
-                'Отменена': '#dc3545'
-            }
-
-            status = task_data.get('status', 'Новая')
-            status_color = status_colors.get(status, '#6c757d')
-
-            tk.Label(
-                info_frame,
-                text=status,
-                font=("Arial", 12, "bold"),
-                bg=status_color,
-                fg='white',
-                relief="solid",
-                bd=1,
-                padx=10,
-                pady=5
-            ).grid(row=0, column=1, sticky='w', pady=10)
+            # Статус
+            status_frame = tk.Frame(params_frame, bg='white')
+            status_frame.pack(side=tk.LEFT, padx=(0, 20))
+            tk.Label(status_frame, text="Статус:", font=("Arial", 11, "bold"), bg='white').pack(anchor='w')
+            
+            status_var = tk.StringVar(value=task.status if task.status in ["Активная", "Выполнена"] else "Активная")
+            status_combo = ttk.Combobox(status_frame, textvariable=status_var, 
+                                      values=["Активная", "Выполнена"],
+                                      state="readonly", width=15)
+            status_combo.pack(pady=(5, 0))
 
             # Приоритет
-            tk.Label(
-                info_frame,
-                text="Приоритет:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=1, column=0, sticky='w', pady=10)
-
-            priority = task_data.get('priority', 'Не указан')
-            tk.Label(
-                info_frame,
-                text=priority,
-                font=("Arial", 12),
-                bg='white',
-                fg='#666'
-            ).grid(row=1, column=1, sticky='w', pady=10)
+            priority_frame = tk.Frame(params_frame, bg='white')
+            priority_frame.pack(side=tk.LEFT)
+            tk.Label(priority_frame, text="Приоритет:", font=("Arial", 11, "bold"), bg='white').pack(anchor='w')
+            
+            priority_var = tk.StringVar(value=task.priority or "Средний")
+            priority_combo = ttk.Combobox(priority_frame, textvariable=priority_var,
+                                        values=["Низкий", "Средний", "Высокий"],
+                                        state="readonly", width=15)
+            priority_combo.pack(pady=(5, 0))
 
             # Срок выполнения
-            tk.Label(
-                info_frame,
-                text="Срок выполнения:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=2, column=0, sticky='w', pady=10)
-
-            due_date = task_data.get('due_date', 'Не указан')
-            tk.Label(
-                info_frame,
-                text=due_date,
-                font=("Arial", 12),
-                bg='white',
-                fg='#666'
-            ).grid(row=2, column=1, sticky='w', pady=10)
-
-            # Дата создания
-            tk.Label(
-                info_frame,
-                text="Дата создания:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=3, column=0, sticky='w', pady=10)
-
-            created_at = task_data.get('created_at', 'Не указана')
-            tk.Label(
-                info_frame,
-                text=created_at,
-                font=("Arial", 12),
-                bg='white',
-                fg='#666'
-            ).grid(row=3, column=1, sticky='w', pady=10)
-
-            # Клиент (если есть)
-            if client_data and 'company' in client_data:
-                tk.Label(
-                    info_frame,
-                    text="Клиент:",
-                    font=("Arial", 12, "bold"),
-                    bg='white'
-                ).grid(row=4, column=0, sticky='w', pady=10)
-
-                tk.Label(
-                    info_frame,
-                    text=client_data.get('company', 'Не указан'),
-                    font=("Arial", 12),
-                    bg='white',
-                    fg='#41a5be',
-                    cursor="hand2"
-                ).grid(row=4, column=1, sticky='w', pady=10)
-
-                # Делаем кликабельной ссылку на клиента
-                def open_client():
-                    client_id = client_data.get('id') or task_data.get('client_id')
-                    if client_id:
-                        self._open_client_card_by_id(client_id)
-                        task_window.destroy()
-
-                # Находим виджет с названием компании и делаем его кликабельным
-                for widget in info_frame.grid_slaves(row=4, column=1):
-                    if isinstance(widget, tk.Label):
-                        widget.bind('<Button-1>', lambda e: open_client())
-                        widget.config(cursor="hand2")
-
-            # Описание задачи
-            tk.Label(
-                info_frame,
-                text="Описание:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=5, column=0, sticky='nw', pady=10)
-
-            description = task_data.get('description', 'Нет описания')
-            desc_text = tk.Text(
-                info_frame,
-                height=8,
-                width=40,
-                font=("Arial", 11),
-                wrap=tk.WORD,
-                bg='#f8f9fa',
-                relief="solid",
-                borderwidth=1
-            )
-            desc_text.grid(row=5, column=1, sticky='w', pady=10)
-            desc_text.insert('1.0', description)
-            desc_text.config(state='disabled')
-
-            # Кнопки внизу
-            buttons_frame = tk.Frame(task_window, bg='#f0f0f0', height=80)
-            buttons_frame.pack(fill=tk.X, side=tk.BOTTOM)
-            buttons_frame.pack_propagate(False)
-
-            btn_container = tk.Frame(buttons_frame, bg='#f0f0f0')
-            btn_container.place(relx=0.5, rely=0.5, anchor='center')
-
-            # Кнопка редактирования
+            due_frame = tk.Frame(main_frame, bg='white')
+            due_frame.pack(fill=tk.X, pady=(0, 15))
+            
+            tk.Label(due_frame, text="Срок выполнения:", font=("Arial", 11, "bold"), bg='white').pack(anchor='w')
+            date_input_frame = tk.Frame(due_frame, bg='white')
+            date_input_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            # Получаем текущий срок задачи
+            current_due_date = getattr(task, 'due_date', None)
+            if current_due_date:
+                if isinstance(current_due_date, str):
+                    due_date_str = current_due_date
+                else:
+                    due_date_str = current_due_date.strftime("%d.%m.%Y") if current_due_date else ""
+            else:
+                due_date_str = datetime.now().strftime("%d.%m.%Y")
+            
+            due_date_var = tk.StringVar(value=due_date_str)
+            due_date_entry = tk.Entry(date_input_frame, textvariable=due_date_var, font=("Arial", 11))
+            due_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            def show_edit_calendar():
+                """Показать календарь для выбора даты"""
+                cal_dialog = CalendarDialog(dialog, "Выберите срок выполнения")
+                selected_date = cal_dialog.show()
+                if selected_date:
+                    due_date_var.set(selected_date.strftime("%d.%m.%Y"))
+            
             tk.Button(
-                btn_container,
-                text="✏ Редактировать",
-                command=lambda: self._edit_task(task_id, task_window),
-                bg="#28a745",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=5)
-
-            # Кнопка закрытия задачи
-            tk.Button(
-                btn_container,
-                text="✅ Завершить",
-                command=lambda: self._complete_task(task_id, task_window),
+                date_input_frame,
+                text="📅",
+                command=show_edit_calendar,
                 bg="#41a5be",
                 fg="white",
-                font=("Arial", 12, "bold"),
+                font=("Arial", 10),
                 relief="flat",
-                width=15,
-                height=1,
                 cursor="hand2"
-            ).pack(side=tk.LEFT, padx=5)
+            ).pack(side=tk.RIGHT, padx=(5, 0))
 
-            # Кнопка удаления задачи
-            tk.Button(
-                btn_container,
-                text="🗑 Удалить",
-                command=lambda: self._delete_task(task_id, task_window),
-                bg="#dc3545",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=5)
+            # Кнопки
+            buttons_frame = tk.Frame(main_frame, bg='white')
+            buttons_frame.pack(fill=tk.X, pady=(20, 0))
 
-            # Кнопка закрытия окна
-            tk.Button(
-                btn_container,
-                text="Закрыть",
-                command=task_window.destroy,
-                bg="#6c757d",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=5)
+            def save_task():
+                title = title_entry.get().strip()
+                if not title:
+                    from tkinter import messagebox
+                    messagebox.showerror("Ошибка", "Укажите название задачи")
+                    return
+
+                description = desc_text.get('1.0', tk.END).strip()
+                status = status_var.get()
+                priority = priority_var.get()
+                due_date = due_date_var.get().strip()
+
+                # Обновляем задачу
+                # Превращаем статус в булево значение для базы данных
+                is_completed = status == 'Выполнена'
+                
+                self.tasks_mgr.update_task(
+                    task_id=task_id,
+                    title=title,
+                    description=description,
+                    status=is_completed,
+                    priority=priority,
+                    due_date=due_date,
+                    client_id=getattr(task, 'client_id', '')
+                )
+
+                dialog.destroy()
+                
+                # Обновляем таблицу задач
+                self._load_tasks()
+                
+                # Также обновляем вкладку задач в карточке клиента
+                parent_window = self.parent.winfo_toplevel()
+
+                def find_clients_view(widget):
+                    if hasattr(widget, '_refresh_tasks_tab'):
+                        return widget
+                    for child in widget.winfo_children():
+                        result = find_clients_view(child)
+                        if result:
+                            return result
+                    return None
+
+                clients_view = find_clients_view(parent_window)
+                if clients_view:
+                    clients_view._refresh_tasks_tab(parent_window)
+
+            tk.Button(buttons_frame, text="Сохранить", command=save_task,
+                     bg="#28a745", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=(0, 10))
+            tk.Button(buttons_frame, text="Отмена", command=dialog.destroy,
+                     bg="#6c757d", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT)
+
+            title_entry.focus_set()
 
         except Exception as e:
-            print(f"Ошибка при открытии карточки задачи: {e}")
-            import traceback
-            traceback.print_exc()
             from tkinter import messagebox
-            messagebox.showerror("Ошибка", f"Не удалось открыть карточку задачи: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось открыть задачу: {e}")
 
-    def _delete_task(self, task_id, parent_window):
-        """Удалить задачу"""
-        from utils.helpers import show_confirmation, show_message
+    def _open_task_card(self, task_id):
+        """Открывает карточку задачи"""
+        # Находим родительское окно и вызываем метод ClientsView
+        parent_window = self.parent.winfo_toplevel()
+        # Ищем экземпляр ClientsView в родительских виджетах
+        def find_clients_view(widget):
+            if hasattr(widget, '_open_task_card'):
+                return widget
+            for child in widget.winfo_children():
+                result = find_clients_view(child)
+                if result:
+                    return result
+            return None
+        
+        clients_view = find_clients_view(parent_window)
+        if clients_view:
+            clients_view._open_task_card(task_id, parent_window)
+    
+    def refresh(self):
+        """Обновляет данные в таблице"""
+        self._load_tasks()
 
-        confirm = show_confirmation(
-            parent_window,
-            "Удаление задачи",
-            "Вы уверены, что хотите удалить эту задачу?\n\nЭто действие нельзя отменить!"
+
+class ClientContactsTable:
+    """Таблица контактов для конкретного клиента"""
+    
+    def __init__(self, parent, client_id, contact_persons_mgr, contact_emails_mgr, clients_view):
+        self.parent = parent
+        self.client_id = client_id
+        self.contact_persons_mgr = contact_persons_mgr
+        self.contact_emails_mgr = contact_emails_mgr
+        self.clients_view = clients_view  # Ссылка на ClientsView для вызова методов
+        self.tree = None
+        
+        self._create_ui()
+    
+    def _create_ui(self):
+        """Создает интерфейс таблицы"""
+        # Заголовок
+        header_frame = tk.Frame(self.parent, bg='#f8f9fa')
+        header_frame.pack(fill=tk.X, padx=15, pady=(20, 10))
+        
+        tk.Label(
+            header_frame,
+            text="Контактные лица",
+            font=("Arial", 16, "bold"),
+            bg='#f8f9fa',
+            fg='#333'
+        ).pack(side=tk.LEFT)
+        
+        # Контейнер для элементов справа
+        right_container = tk.Frame(header_frame, bg='#f8f9fa')
+        right_container.pack(side=tk.RIGHT)
+        
+        # Сортировка
+        tk.Label(
+            right_container,
+            text="Сортировка:",
+            font=("Arial", 10),
+            bg='#f8f9fa',
+            fg='#666'
+        ).pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.sort_var = tk.StringVar(value="По ФИО (А-Я)")
+        sort_options = [
+            "По ФИО (А-Я)",
+            "По ФИО (Я-А)", 
+            "По должности (А-Я)",
+            "По должности (Я-А)"
+        ]
+        
+        sort_combo = ttk.Combobox(
+            right_container,
+            textvariable=self.sort_var,
+            values=sort_options,
+            state="readonly",
+            width=20,
+            font=("Arial", 9)
         )
+        sort_combo.pack(side=tk.LEFT, padx=(0, 10))
+        sort_combo.bind("<<ComboboxSelected>>", self._on_sort_change)
+        
+        # Кнопка добавления контакта
+        add_btn = tk.Button(
+            right_container,
+            text="+ Добавить контакт",
+            command=self._add_contact,
+            bg="#28a745",
+            fg="white",
+            font=("Arial", 11, "bold"),
+            relief="flat",
+            cursor="hand2"
+        )
+        add_btn.pack(side=tk.LEFT, padx=10)
+        
+        # Создаем таблицу
+        self._create_table()
+        
+        # Загружаем данные
+        self._load_contacts()
+    
+    def _create_table(self):
+        """Создает Treeview таблицу"""
+        # Фрейм для таблицы с прокруткой
+        table_frame = tk.Frame(self.parent)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 20))
+        
+        # Создаем Treeview
+        self.tree = ttk.Treeview(
+            table_frame,
+            columns=("ID", "ФИО", "Должность", "Телефон", "Email"),
+            show="headings",
+            selectmode="browse"
+        )
+        
+        # Настройка колонок
+        self.tree.heading("ID", text="ID")
+        self.tree.heading("ФИО", text="ФИО")
+        self.tree.heading("Должность", text="Должность")
+        self.tree.heading("Телефон", text="Телефон")
+        self.tree.heading("Email", text="Email")
+        
+        # Ширина колонок
+        self.tree.column("ID", width=50, minwidth=50)
+        self.tree.column("ФИО", width=200, minwidth=150)
+        self.tree.column("Должность", width=150, minwidth=120)
+        self.tree.column("Телефон", width=120, minwidth=100)
+        self.tree.column("Email", width=200, minwidth=150)
+        
+        # Прокрутка
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Размещение
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Обработчики
+        self.tree.bind('<Double-1>', self._on_double_click)
+        self.tree.bind('<Button-1>', self._on_single_click)
+        
+        # Стиль для основного контакта
+        self._setup_tag_styles()
+    
+    def _setup_tag_styles(self):
+        """Настраивает стили для разных типов контактов"""
+        style = ttk.Style()
+        
+        # Исправление для tag_configure в Windows
+        def fixed_map(option):
+            return [elm for elm in style.map('Treeview', query_opt=option) 
+                   if elm[:2] != ('!disabled', '!selected')]
+        
+        style.map('Treeview', foreground=fixed_map('foreground'), 
+                  background=fixed_map('background'))
+        
+        # Выделяем основной контакт зеленым цветом как в таблице клиентов
+        self.tree.tag_configure("primary", background="#d4edda")
+    
+    def _apply_sorting(self, contacts, sort_option):
+        """Применяет сортировку к контактам"""
+        try:
+            if sort_option == "По ФИО (А-Я)":
+                contacts = sorted(contacts, key=lambda c: self._get_full_name(c).lower())
+            elif sort_option == "По ФИО (Я-А)":
+                contacts = sorted(contacts, key=lambda c: self._get_full_name(c).lower(), reverse=True)
+            elif sort_option == "По должности (А-Я)":
+                contacts = sorted(contacts, key=lambda c: self._get_position(c).lower())
+            elif sort_option == "По должности (Я-А)":
+                contacts = sorted(contacts, key=lambda c: self._get_position(c).lower(), reverse=True)
+            return contacts
+        except:
+            return contacts
+    
+    def _get_full_name(self, contact):
+        """Получает ФИО контакта"""
+        return contact['full_name']
+    
+    def _get_position(self, contact):
+        """Получает должность контакта"""
+        return contact['position']
+    
+    def _on_sort_change(self, event=None):
+        """Обработчик изменения сортировки"""
+        self._load_contacts()
+    
+    def _load_contacts(self):
+        """Загружает контакты клиента в таблицу"""
+        # Очищаем таблицу
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        if not self.contact_persons_mgr:
+            return
+        
+        try:
+            # Получаем контакты клиента
+            contacts = self.contact_persons_mgr.get_by_client(self.client_id)
+            
+            # Применяем сортировку
+            sort_option = self.sort_var.get()
+            contacts = self._apply_sorting(contacts, sort_option)
+            
+            for contact in contacts:
+                contact_id = contact['id']
+                full_name = contact['full_name']
+                position = contact['position']
+                phone = contact['phone']
+                
+                # Получаем email для контакта
+                email = ""
+                if self.contact_emails_mgr:
+                    try:
+                        emails = self.contact_emails_mgr.get_by_contact(contact_id)
+                        if emails:
+                            email = emails[0]['email']
+                    except Exception as e:
+                        print(f"Ошибка загрузки email для контакта {contact_id}: {e}")
+                
+                # Добавляем в таблицу
+                is_primary = contact['is_primary'] if isinstance(contact['is_primary'], bool) else bool(contact['is_primary'])
+                tags = ('primary',) if is_primary else ()
+                
+                self.tree.insert(
+                    "", 
+                    "end",
+                    values=(contact_id, full_name, position, phone, email),
+                    tags=tags
+                )
+        
+        except Exception as e:
+            print(f"Ошибка при загрузке контактов: {e}")
+    
+    def _on_double_click(self, event):
+        """Обработчик двойного клика - открытие диалога редактирования"""
+        selection = self.tree.selection()
+        if selection:
+            item = selection[0]
+            values = self.tree.item(item, "values")
+            if values:
+                contact_id = values[0]
+                # Открываем диалог редактирования контакта
+                self._edit_contact(contact_id)
+    
+    def _on_single_click(self, event):
+        """Обработчик одинарного клика - ничего не делает"""
+        pass
+    
+    def _add_contact(self):
+        """Добавляет новый контакт для клиента"""
+        self.clients_view._add_contact_to_client(self.client_id, self.parent)
+    
+    def _edit_contact(self, contact_id):
+        """Открывает диалог редактирования контакта"""
+        # Находим родительское окно карточки клиента
+        parent_window = self.parent.winfo_toplevel()
+        
+        # Создаем диалог редактирования контакта
+        self.clients_view._edit_contact(contact_id, parent_window)
+        
+        # Обновляем таблицу контактов после редактирования
+        self.refresh()
+        
+        # Также обновляем вкладку контактов в карточке клиента
+        self.clients_view._refresh_contacts_tab()
+    
+    def refresh(self):
+        """Обновляет данные в таблице"""
+        self._load_contacts()
 
-        if confirm and self.tasks_mgr:
+
+class ClientsView(TableViewTemplate):
+    """Раздел клиентов с поиском, сортировкой и пагинацией"""
+
+    TITLE = "Клиенты"
+    ADD_BUTTON_TEXT = "+ Добавить клиента"
+    SEARCH_FIELDS_TEXT = "компании или контактному лицу"
+    COLUMNS = ("ID", "Компания", "Контактное лицо", "Должность", "Телефон", "Адрес", "Задачи")
+    COLUMN_WIDTHS = {
+        "ID": 50,
+        "Компания": 200,
+        "Контактное лицо": 180,
+        "Должность": 150,
+        "Телефон": 120,
+        "Адрес": 200,
+        "Задачи": 100
+    }
+    STRETCH_COLUMNS = ["Компания", "Контактное лицо", "Должность", "Телефон", "Адрес"]
+    ID_COLUMN = "ID"
+    PAGE_SIZE = 50
+    
+    SORT_OPTIONS = [
+        ("company", "По компании (А-Я)"),
+        ("company:DESC", "По компании (Я-А)"),
+        ("primary_contact", "По контакту (А-Я)"),
+        ("primary_contact:DESC", "По контакту (Я-А)"),
+        ("created_at", "По дате создания (новые)"),
+        ("created_at:DESC", "По дате создания (старые)")
+    ]
+
+    def __init__(self, parent_frame, clients_mgr, contact_persons_mgr, contact_emails_mgr, interactions_mgr, tasks_mgr=None):
+        super().__init__(parent_frame, clients_mgr)
+        self.clients_mgr = clients_mgr
+        self.contact_persons_mgr = contact_persons_mgr
+        self.contact_emails_mgr = contact_emails_mgr
+        self.interactions_mgr = interactions_mgr
+        self.tasks_mgr = tasks_mgr
+        
+        # Переменные для отслеживания открытых окон
+        self.add_client_dialog = None
+        self.edit_client_dialogs = {}  # client_id -> dialog
+        self.client_card_dialogs = {}  # client_id -> dialog
+        self.task_card_dialogs = {}  # task_id -> dialog
+        self.add_contact_dialogs = {}  # client_id -> dialog
+
+    def _on_tree_enter(self, event):
+        pass
+
+    def _on_tree_leave(self, event):
+        pass
+
+    def _on_tree_motion(self, event):
+        pass
+
+    def _add_mouse_wheel_support(self, canvas):
+        """Добавить поддержку прокрутки колесиком мыши для canvas"""
+        def on_mouse_wheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+    def _create_table(self):
+        """Создаёт Treeview таблицу с дополнительной обработкой клика на задачи"""
+        # Вызываем родительский метод
+        super()._create_table()
+        
+        # Добавляем обработку одинарного клика на колонку "Задачи"
+        self.tree.bind('<Button-1>', self._on_single_click)
+
+    def _on_single_click(self, event):
+        """Обрабатывает одинарный клик по таблице"""
+        # Определяем колонку и строку
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+            
+        column = self.tree.identify_column(event.x)
+        item = self.tree.identify_row(event.y)
+        
+        if not item or not column:
+            return
+            
+        # Проверяем что кликнули на колонку "Задачи" (седьмая колонка)
+        if column == "#7":  # #7 это седьмая колонка (ID, Компания, Контактное лицо, Должность, Телефон, Адрес, Задачи)
+            # Получаем ID клиента из первой колонки
+            values = self.tree.item(item, 'values')
+            if not values:
+                return
+                
             try:
-                # Удаляем задачу
-                self.tasks_mgr.delete(task_id)
-                show_message(parent_window, "Успех", "Задача удалена", "success")
-                parent_window.destroy()
+                client_id = int(values[0])
+                self._create_task_for_client(client_id)
+            except (ValueError, IndexError):
+                pass
 
-                # Здесь можно добавить обновление интерфейса
-                # Например, обновить вкладку задач текущего клиента
-            except Exception as e:
-                show_message(parent_window, "Ошибка", f"Не удалось удалить задачу: {e}", "error")
+    def _get_data(self, page, search, sort_by, sort_order):
+        """Загрузка данных с пагинацией и поиском"""
+        try:
+            # Получаем данные с поиском или без
+            if search:
+                clients = self.clients_mgr.search(search.lower())
+            else:
+                clients = self.clients_mgr.get_all()
+            
+            # Применяем сортировку
+            if sort_by:
+                clients = self._apply_sort(clients, sort_by, sort_order)
+            
+            # Эмуляция пагинации
+            total = len(clients)
+            start_idx = (page - 1) * self.PAGE_SIZE
+            end_idx = start_idx + self.PAGE_SIZE
+            paginated_clients = clients[start_idx:end_idx]
+            
+            return paginated_clients, total
+            
+        except Exception as e:
+            print(f"Ошибка загрузки данных: {e}")
+            return [], 0
+
+    def _apply_sort(self, clients, sort_by, sort_order):
+        """Применяет сортировку к списку клиентов"""
+        reverse = sort_order == "DESC"
+        
+        if sort_by == "company":
+            clients.sort(key=lambda x: x.get('company', '').lower(), reverse=reverse)
+        elif sort_by == "primary_contact":
+            clients.sort(key=lambda x: x.get('primary_contact', '').lower(), reverse=reverse)
+        elif sort_by == "created_at":
+            clients.sort(key=lambda x: x.get('created_at', ''), reverse=reverse)
+            
+        return clients
+
+    def _item_to_row_values(self, item):
+        """Преобразует клиента в строку таблицы"""
+        if not isinstance(item, dict):
+            return ("", "", "", "", "", "", "", "")
+        
+        values = (
+            item.get('id', ''),
+            item.get('company', '—'),
+            item.get('primary_contact', '—'),
+            item.get('primary_position', '—'),
+            item.get('primary_phone', '—'),
+            item.get('address', '—'),
+            "➕ Задача"  # Кнопка для создания задачи
+        )
+        
+        return values
+
+    def _open_create_dialog(self):
+        """Диалог создания нового клиента"""
+        self._show_add_client_dialog()
+
+    def _on_row_double_click(self, client_id):
+        """Обработка двойного клика по строке - открытие карточки клиента"""
+        self._open_client_card_by_id(client_id)
 
     def _show_add_client_dialog(self):
-        """Диалог добавления клиента"""
-
+        """Диалог добавления клиента с расширенным функционалом"""
+        # Проверяем, не открыто ли уже окно добавления клиента
+        if self.add_client_dialog and tk.Toplevel.winfo_exists(self.add_client_dialog):
+            self.add_client_dialog.lift()
+            self.add_client_dialog.focus_force()
+            return
+        
         # Создаём диалоговое окно
         dialog = tk.Toplevel(self.parent_frame)
         dialog.title("Добавить клиента")
         dialog.geometry("750x750")
         dialog.configure(bg='white')
         dialog.resizable(False, False)
+        
+        # Сохраняем ссылку на окно
+        self.add_client_dialog = dialog
+        
+        # Очищаем ссылку при закрытии
+        def on_dialog_close():
+            self.add_client_dialog = None
+            dialog.destroy()
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
 
         # Заголовок
         header = tk.Frame(dialog, bg='#333333', height=60)
@@ -765,7 +1160,6 @@ class ClientsView(BaseView):
         def create_contact_fields():
             """Создает поля для ввода контактного лица"""
             if len(contact_widgets) >= 4:
-                from utils.helpers import show_message
                 show_message(dialog, "Внимание", "Максимум 4 контактных лица!", "warning")
                 return
 
@@ -800,38 +1194,6 @@ class ClientsView(BaseView):
                 bg='#f8f9fa'
             )
             primary_label.pack(side=tk.LEFT, padx=5)
-
-            # Кнопка удаления контакта
-            def remove_contact():
-                """Удаляет контактное лицо из формы"""
-                contact_box.destroy()
-                if contact_widget in contact_widgets:
-                    contact_widgets.remove(contact_widget)
-
-                # Обновляем индексы оставшихся контактов
-                for i, w in enumerate(contact_widgets):
-                    w['radio'].config(value=i, text=f"Контакт #{i + 1}")
-
-                # Если удалили основной контакт, выбираем новый
-                if primary_contact_var.get() >= len(contact_widgets):
-                    if contact_widgets:
-                        primary_contact_var.set(0)
-                    else:
-                        primary_contact_var.set(-1)
-
-                update_primary_contact_ui()
-
-            remove_btn = tk.Button(
-                header_frame,
-                text="✖",
-                command=remove_contact,
-                bg="#dc3545",
-                fg="white",
-                font=("Arial", 8),
-                relief="flat",
-                cursor="hand2"
-            )
-            remove_btn.pack(side=tk.RIGHT)
 
             # Поля для ввода данных контакта
             fields_frame = tk.Frame(contact_box, bg='#f8f9fa')
@@ -912,6 +1274,38 @@ class ClientsView(BaseView):
                 'primary_label': primary_label
             }
 
+            # Кнопка удаления контакта (добавляется после создания contact_widget)
+            def remove_contact(widget=contact_widget):
+                """Удаляет контактное лицо из формы"""
+                contact_box.destroy()
+                if widget in contact_widgets:
+                    contact_widgets.remove(widget)
+
+                # Обновляем индексы оставшихся контактов
+                for i, w in enumerate(contact_widgets):
+                    w['radio'].config(value=i, text=f"Контакт #{i + 1}")
+
+                # Если удалили основной контакт, выбираем новый
+                if primary_contact_var.get() >= len(contact_widgets):
+                    if contact_widgets:
+                        primary_contact_var.set(0)
+                    else:
+                        primary_contact_var.set(-1)
+
+                update_primary_contact_ui()
+
+            remove_btn = tk.Button(
+                header_frame,
+                text="✖",
+                command=remove_contact,
+                bg="#dc3545",
+                fg="white",
+                font=("Arial", 8),
+                relief="flat",
+                cursor="hand2"
+            )
+            remove_btn.pack(side=tk.RIGHT)
+
             contact_widgets.append(contact_widget)
             update_primary_contact_ui()
 
@@ -928,87 +1322,11 @@ class ClientsView(BaseView):
         add_contact_btn.pack(pady=5)
 
         create_contact_fields()  # Первый контакт
-        tk.Button(contacts_container, text="+ Добавить контакт", command=create_contact_fields, bg="#28a745",
-                  fg="white", font=("Arial", 10)).pack(pady=5)
-
-        # --- EMAIL (ТЕПЕРЬ ТОЖЕ ДИНАМИЧЕСКИЕ) ---
-        email_header_frame = tk.Frame(scrollable_content, bg='white')
-        email_header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
-
-        tk.Label(email_header_frame, text="📧 Email адреса", font=("Arial", 14, "bold"), bg='white', fg='#333').pack(
-            side=tk.LEFT)
-        tk.Label(email_header_frame, text="(до 4, выберите основной)", font=("Arial", 10), bg='white', fg='#999').pack(
-            side=tk.LEFT, padx=10)
-
-        emails_container = tk.Frame(scrollable_content, bg='white')
-        emails_container.pack(fill=tk.X, padx=20, pady=(0, 30))
-
-        email_widgets = []
-        primary_email_var = tk.IntVar(value=0)
-
-        def update_primary_email_ui():
-            selected = primary_email_var.get()
-            for idx, w in enumerate(email_widgets):
-                w['radio'].config(value=idx)
-                w['radio'].config(text=f"Email #{idx + 1}")
-                if idx == selected:
-                    w['primary_label'].config(text="⭐ ОСНОВНОЙ", fg='#4CAF50')
-                else:
-                    w['primary_label'].config(text="", fg='#999')
-
-        def create_email_fields():
-            if len(email_widgets) >= 4:
-                from utils.helpers import show_message
-                show_message(dialog, "Внимание", "Максимум 4 email адреса!", "warning")
-                return
-
-            idx = len(email_widgets)
-            box = tk.Frame(emails_container, bg='#f8f9fa', relief='solid', bd=1)
-            box.pack(fill=tk.X, pady=5)
-
-            header = tk.Frame(box, bg='#f8f9fa')
-            header.pack(fill=tk.X, padx=10, pady=8)
-
-            radio = tk.Radiobutton(header, text=f"Email #{idx + 1}", variable=primary_email_var, value=idx,
-                                   font=("Arial", 10, "bold"), bg='#f8f9fa', selectcolor='#4CAF50',
-                                   command=update_primary_email_ui)
-            radio.pack(side=tk.LEFT)
-
-            p_label = tk.Label(header, text="", font=("Arial", 9, "bold"), bg='#f8f9fa')
-            p_label.pack(side=tk.LEFT, padx=5)
-
-            def remove(b=box, w=None):
-                b.destroy()
-                if w in email_widgets: email_widgets.remove(w)
-                if primary_email_var.get() >= len(email_widgets): primary_email_var.set(0)
-                update_primary_email_ui()
-
-            tk.Button(header, text="✖", command=lambda: remove(box, widget), bg="#dc3545", fg="white",
-                      font=("Arial", 8), relief="flat").pack(side=tk.RIGHT)
-
-            fields = tk.Frame(box, bg='#f8f9fa')
-            fields.pack(fill=tk.X, padx=10, pady=(0, 8))
-
-            tk.Label(fields, text="Email:", font=("Arial", 9), bg='#f8f9fa').pack(anchor='w')
-            em = tk.Entry(fields, font=("Arial", 10), relief="solid", borderwidth=1)
-            em.pack(fill=tk.X, pady=2, ipady=3)
-
-            widget = {'box': box, 'email': em, 'radio': radio, 'primary_label': p_label}
-            email_widgets.append(widget)
-            update_primary_email_ui()
-            return widget
-
-        create_email_fields()
-        tk.Button(emails_container, text="+ Добавить Email", command=create_email_fields, bg="#28a745", fg="white",
-                  font=("Arial", 10)).pack(pady=5)
 
         # --- СОХРАНЕНИЕ ---
-        # ─── СОХРАНЕНИЕ ────────────────────────────────────────────────────────────────
         def save_client():
             """Сохраняет нового клиента с расширенной валидацией"""
-            from utils.helpers import show_message
-            from tkinter import messagebox  # <-- ДОБАВЬТЕ
-            from datetime import date  # <-- ДОБАВЬТЕ
+            from datetime import date
 
             company = company_entry.get().strip()
 
@@ -1079,6 +1397,7 @@ class ClientsView(BaseView):
                     name = w['name'].get().strip()
                     position = w['position'].get().strip()
                     phone = w['phone'].get().strip()
+                    email = w['email'].get().strip()
                     is_primary = (idx == primary_contact_var.get())
 
                     contact_id = self.contact_persons_mgr.add(
@@ -1095,18 +1414,15 @@ class ClientsView(BaseView):
                             primary_contact_name = name
 
                         # Email
-                        email_widget = w.get('email')
-                        if email_widget:
-                            email = email_widget.get().strip()
-                            if email:
-                                try:
-                                    self.contact_emails_mgr.add(
-                                        contact_person_id=contact_id,
-                                        email=email,
-                                        is_primary=True
-                                    )
-                                except Exception as e:
-                                    print(f"Ошибка сохранения email для {name}: {e}")
+                        if email:
+                            try:
+                                self.contact_emails_mgr.add(
+                                    contact_person_id=contact_id,
+                                    email=email,
+                                    is_primary=True
+                                )
+                            except Exception as e:
+                                print(f"Ошибка сохранения email для {name}: {e}")
 
                 # 3. Запись в историю
                 try:
@@ -1120,28 +1436,18 @@ class ClientsView(BaseView):
                     print(f"Ошибка записи в историю: {e}")
 
                 # Успех
-                msg = f"Клиент успешно добавлен!\n\n" \
-                      f"Компания: {company}\n" \
+                msg = f"Клиент '{company}' успешно добавлен!\n\n" \
                       f"ID: {client_id}\n" \
-                      f"Контактов: {len(saved_contacts)}\n" \
-                      f"Основной: {primary_contact_name or 'не указан'}"
+                      f"Контактов добавлено: {len(saved_contacts)}\n" \
+                      f"Основной контакт: {primary_contact_name or 'не указан'}"
 
-                show_message(dialog, "✅ Успех", msg, "success")
+                # Используем messagebox для более крупного окна
+                messagebox.showinfo("✅ Успех", msg)
 
                 dialog.destroy()
 
                 # Обновление интерфейса
-                if hasattr(self, 'info_label'):
-                    self.info_label.config(text=f"Клиентов: {self.clients_mgr.get_count()}")
-
-                self._update_table_data()  # или как у тебя называется метод обновления таблицы
-
-                # Предложение создать задачу
-                def ask_task():
-                    if messagebox.askyesno("Создать задачу?", f"Создать задачу для '{company}'?"):
-                        self._create_task_for_client(client_id)
-
-                dialog.after(500, ask_task)
+                self._refresh_data()
 
             except Exception as e:
                 import traceback
@@ -1187,13 +1493,71 @@ class ClientsView(BaseView):
 
         company_entry.focus_set()
 
+    def _open_client_card_by_id(self, client_id):
+        """Открыть карточку клиента по ID"""
+        try:
+            client_data = self.clients_mgr.get_by_id(client_id)
+
+            if client_data:
+                if hasattr(client_data, 'keys'):
+                    client = {key: client_data[key] for key in client_data.keys()}
+                else:
+                    try:
+                        client = dict(client_data)
+                    except:
+                        client = {}
+
+                # Получаем основной контакт
+                try:
+                    prim = self.contact_persons_mgr.get_primary(client_id)
+                    if prim:
+                        client['primary_contact'] = prim.get('full_name', '')
+                        client['primary_position'] = prim.get('position', '')
+                        client['primary_phone'] = prim.get('phone', '')
+                    else:
+                        client['primary_contact'] = ""
+                        client['primary_position'] = ""
+                        client['primary_phone'] = ""
+                except Exception as e:
+                    print(f"Ошибка при получении основного контакта: {e}")
+                    client['primary_contact'] = ""
+                    client['primary_position'] = ""
+                    client['primary_phone'] = ""
+
+                self._open_client_card(client)
+
+        except Exception as e:
+            print(f"Ошибка при открытии карточки: {e}")
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка", f"Не удалось открыть карточку: {e}")
+
     def _open_client_card(self, client):
         """Открыть карточку клиента"""
+        # Проверяем, не открыта ли уже карточка этого клиента
+        client_id = client['id']
+        if client_id in self.client_card_dialogs:
+            existing_dialog = self.client_card_dialogs[client_id]
+            if existing_dialog and tk.Toplevel.winfo_exists(existing_dialog):
+                existing_dialog.lift()
+                existing_dialog.focus_force()
+                return
+        
         # Создаём новое окно
         card_window = tk.Toplevel(self.parent_frame)
         card_window.title(f"Карточка клиента: {client['company']}")
         card_window.geometry("900x700")
         card_window.configure(bg='white')
+        
+        # Сохраняем ссылку на окно
+        self.client_card_dialogs[client_id] = card_window
+        
+        # Очищаем ссылку при закрытии
+        def on_dialog_close():
+            if client_id in self.client_card_dialogs:
+                del self.client_card_dialogs[client_id]
+            card_window.destroy()
+        
+        card_window.protocol("WM_DELETE_WINDOW", on_dialog_close)
 
         # Заголовок (в стиле меню)
         header = tk.Frame(card_window, bg='#333333', height=60)
@@ -1233,7 +1597,7 @@ class ClientsView(BaseView):
         # Вкладка 3: Задачи (ЗАМЕНЯЕМ ИСТОРИЮ НА ЗАДАЧИ)
         tab_tasks = tk.Frame(notebook, bg='white')
         notebook.add(tab_tasks, text="✅ Задачи")
-        self._create_tasks_tab(tab_tasks, client['id'])
+        self._create_tasks_tab(tab_tasks, client['id'], card_window)
 
         # ПАНЕЛЬ КНОПОК ВНИЗУ
         buttons_container = tk.Frame(card_window, bg='#f0f0f0', height=80)
@@ -1299,44 +1663,6 @@ class ClientsView(BaseView):
             cursor="hand2"
         ).pack(side=tk.LEFT, padx=10, pady=10)
 
-    def _open_client_card_by_id(self, client_id):
-        """Открыть карточку клиента по ID"""
-        try:
-            client_data = self.clients_mgr.get_by_id(client_id)
-
-            if client_data:
-                if hasattr(client_data, 'keys'):
-                    client = {key: client_data[key] for key in client_data.keys()}
-                else:
-                    try:
-                        client = dict(client_data)
-                    except:
-                        client = {}
-
-                # Получаем основной контакт
-                try:
-                    prim = self.contact_persons_mgr.get_primary(client_id)
-                    if prim:
-                        client['primary_contact'] = prim.get('full_name', '')
-                        client['primary_position'] = prim.get('position', '')
-                        client['primary_phone'] = prim.get('phone', '')
-                    else:
-                        client['primary_contact'] = ""
-                        client['primary_position'] = ""
-                        client['primary_phone'] = ""
-                except Exception as e:
-                    print(f"Ошибка при получении основного контакта: {e}")
-                    client['primary_contact'] = ""
-                    client['primary_position'] = ""
-                    client['primary_phone'] = ""
-
-                self._open_client_card(client)
-
-        except Exception as e:
-            print(f"Ошибка при открытии карточки: {e}")
-            from tkinter import messagebox
-            messagebox.showerror("Ошибка", f"Не удалось открыть карточку: {e}")
-
     def _create_main_tab(self, parent, client):
         """Вкладка 'Основное'"""
         tk.Label(
@@ -1378,535 +1704,607 @@ class ClientsView(BaseView):
         self._add_info_row(info_frame, "Дата создания:", client['created_at'], 3)
 
     def _create_contacts_tab(self, parent, client_id):
-        """Вкладка 'Контактные лица' (с email)"""
-        tk.Label(
-            parent,
-            text="Контактные лица",
-            font=("Arial", 16, "bold"),
-            bg='white'
-        ).pack(pady=(20, 10))
+        """Вкладка 'Контактные лица' (табличное представление)"""
+        # Добавляем метку для идентификации вкладки
+        parent._is_contacts_tab = True
+        parent._client_id = client_id
+        
+        # Создаем таблицу контактов клиента
+        self.contacts_table = ClientContactsTable(parent, client_id, self.contact_persons_mgr, self.contact_emails_mgr, self)
+        
+        # Сохраняем ссылку на таблицу для обновления
+        parent._contacts_table = self.contacts_table
 
-        # Получаем контакты
-        contacts = self.contact_persons_mgr.get_by_client(client_id)
-
-        if not contacts:
-            tk.Label(
-                parent,
-                text="Контактных лиц нет",
-                font=("Arial", 12),
-                fg="gray",
-                bg='white'
-            ).pack(pady=30)
-            return
-
-        # Canvas для прокрутки
-        canvas = tk.Canvas(parent, bg='white')
-        scrollbar = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='white')
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        # Список контактов с email
-        for contact in contacts:
-            contact_frame = tk.Frame(scrollable_frame, bg='#f8f9fa', relief='solid', bd=1)
-            contact_frame.pack(padx=20, pady=10, fill=tk.X)
-
-            # Заголовок контакта
-            header_frame = tk.Frame(contact_frame, bg='#f8f9fa')
-            header_frame.pack(fill=tk.X, padx=15, pady=(10, 5))
-
-            primary_label = " ⭐ ОСНОВНОЙ" if contact['is_primary'] else ""
-
-            tk.Label(
-                header_frame,
-                text=f"👤 {contact['full_name']}{primary_label}",
-                font=("Arial", 14, "bold"),
-                bg='#f8f9fa'
-            ).pack(side=tk.LEFT)
-
-            # Информация о контакте
-            info_frame = tk.Frame(contact_frame, bg='#f8f9fa')
-            info_frame.pack(fill=tk.X, padx=20, pady=(5, 10))
-
-            # Должность
-            if contact['position']:
-                tk.Label(
-                    info_frame,
-                    text=f"📋 Должность: {contact['position']}",
-                    font=("Arial", 11),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-            # Телефон
-            if contact['phone']:
-                tk.Label(
-                    info_frame,
-                    text=f"📞 Телефон: {contact['phone']}",
-                    font=("Arial", 11),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-            # Email адреса для этого контакта
-            if self.contact_emails_mgr:
-                try:
-                    emails = self.contact_emails_mgr.get_by_contact(contact['id'])
-                    if emails:
-                        email_text = ", ".join([email['email'] for email in emails])
-                        tk.Label(
-                            info_frame,
-                            text=f"📧 Email: {email_text}",
-                            font=("Arial", 11),
-                            bg='#f8f9fa',
-                            fg='#666'
-                        ).pack(anchor='w', pady=2)
-                except Exception as e:
-                    print(f"Ошибка при загрузке email: {e}")
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Кнопка создания нового контакта
-        btn_frame = tk.Frame(parent, bg='white')
-        btn_frame.pack(pady=(10, 20))
-
-        tk.Button(
-            btn_frame,
-            text="➕ Добавить контактное лицо",
-            command=lambda: self._add_contact_to_client(client_id, parent),
-            bg="#41a5be",
-            fg="white",
-            font=("Arial", 11),
-            relief="flat",
-            padx=20,
-            pady=8,
-            cursor="hand2"
-        ).pack()
-
-    def _create_tasks_tab(self, parent, client_id):
-        """Вкладка 'Задачи'"""
-        tk.Label(
-            parent,
-            text="Задачи клиента",
-            font=("Arial", 16, "bold"),
-            bg='white'
-        ).pack(pady=(20, 10))
-
-        # Проверяем наличие менеджера задач
-        if not self.tasks_mgr:
-            tk.Label(
-                parent,
-                text="Менеджер задач не инициализирован",
-                font=("Arial", 12),
-                fg="red",
-                bg='white'
-            ).pack(pady=30)
-            return
-
+    def _refresh_contacts_tab(self):
+        """Обновить вкладку контактов"""
         try:
-            # Получаем задачи для клиента
-            tasks = self.tasks_mgr.get_by_client(client_id)
-
-            if not tasks:
-                tk.Label(
-                    parent,
-                    text="Задач нет",
-                    font=("Arial", 12),
-                    fg="gray",
-                    bg='white'
-                ).pack(pady=30)
-                return
-
-            # Canvas для прокрутки
-            canvas = tk.Canvas(parent, bg='white')
-            scrollbar = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-            scrollable_frame = tk.Frame(canvas, bg='white')
-
-            scrollable_frame.bind(
-                "<Configure>",
-                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-            )
-
-            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-            canvas.configure(yscrollcommand=scrollbar.set)
-
-            # Делаем scrollable_frame шириной как canvas
-            def update_scrollable_width(event):
-                canvas.itemconfig(canvas_window, width=event.width)
-
-            canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
-            canvas.bind('<Configure>', update_scrollable_width)
-
-            # Отображаем задачи
-            for task in tasks:
-                task_frame = tk.Frame(scrollable_frame, bg='#f8f9fa', relief='solid', bd=1)
-                task_frame.pack(padx=10, pady=8, fill=tk.X, expand=True)  # Изменено: fill=tk.X, expand=True
-
-                # Получаем атрибуты задачи
-                try:
-                    task_id = task.id if hasattr(task, 'id') else getattr(task, 'id', '')
-                    title = task.title if hasattr(task, 'title') else getattr(task, 'title', 'Без названия')
-                    status = task.status if hasattr(task, 'status') else getattr(task, 'status', 'Новая')
-                    created_at = task.created_at if hasattr(task, 'created_at') else getattr(task, 'created_at', '')
-                    priority = task.priority if hasattr(task, 'priority') else getattr(task, 'priority', None)
-                    due_date = task.due_date if hasattr(task, 'due_date') else getattr(task, 'due_date', None)
-                    description = task.description if hasattr(task, 'description') else getattr(task, 'description', '')
-                except AttributeError:
-                    try:
-                        task_id = task['id'] if 'id' in task else ''
-                        title = task['title'] if 'title' in task else 'Без названия'
-                        status = task['status'] if 'status' in task else 'Новая'
-                        created_at = task['created_at'] if 'created_at' in task else ''
-                        priority = task.get('priority') if isinstance(task, dict) else None
-                        due_date = task.get('due_date') if isinstance(task, dict) else None
-                        description = task.get('description') if isinstance(task, dict) else ''
-                    except (KeyError, TypeError):
-                        title = str(task) if task else 'Неизвестная задача'
-                        status = 'Новая'
-                        created_at = ''
-                        priority = None
-                        due_date = None
-                        description = ''
-
-                # Сохраняем task_id для обработки клика
-                task_frame.task_id = task_id
-                task_frame.task_data = task
-
-                # Статус задачи (цвет в зависимости от статуса)
-                status_colors = {
-                    'Новая': '#17a2b8',
-                    'В работе': '#007bff',
-                    'Выполнена': '#28a745',
-                    'Отложена': '#6c757d',
-                    'Отменена': '#dc3545'
-                }
-
-                status_color = status_colors.get(status, '#6c757d')
-
-                # Заголовок задачи - делаем кликабельным
-                header_frame = tk.Frame(task_frame, bg='#f8f9fa')
-                header_frame.pack(fill=tk.X, padx=15, pady=10)
-
-                # Создаем кнопку-заголовок вместо Label
-                title_btn = tk.Label(
-                    header_frame,
-                    text=f"📌 {title}",
-                    font=("Arial", 13, "bold"),
-                    bg='#f8f9fa',
-                    fg='#333',
-                    cursor="hand2"
-                )
-                title_btn.pack(side=tk.LEFT)
-
-                # Привязываем обработчик клика к заголовку
-                title_btn.bind('<Button-1>', lambda e, t_id=task_id: self._open_task_card(t_id))
-
-                # Также делаем всю строку кликабельной
-                task_frame.bind('<Button-1>', lambda e, t_id=task_id: self._open_task_card(t_id))
-                for child in task_frame.winfo_children():
-                    child.bind('<Button-1>', lambda e, t_id=task_id: self._open_task_card(t_id))
-
-                # Статус задачи
-                tk.Label(
-                    header_frame,
-                    text=status,
-                    font=("Arial", 10, "bold"),
-                    bg=status_color,
-                    fg='white',
-                    relief="solid",
-                    bd=1,
-                    padx=10,
-                    pady=3
-                ).pack(side=tk.RIGHT)
-
-                # Информация о задаче
-                info_frame = tk.Frame(task_frame, bg='#f8f9fa')
-                info_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
-
-                # Приоритет
-                priority_text = ""
-                if priority:
-                    priority_icons = {'Высокий': '🔴', 'Средний': '🟡', 'Низкий': '🟢'}
-                    priority_text = f" | Приоритет: {priority_icons.get(priority, '')} {priority}"
-
-                # Срок выполнения
-                due_date_text = ""
-                if due_date:
-                    due_date_text = f" | Срок: {due_date}"
-
-                tk.Label(
-                    info_frame,
-                    text=f"📅 Создана: {created_at}{priority_text}{due_date_text}",
-                    font=("Arial", 10),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-                # Описание задачи
-                if description:
-                    desc_frame = tk.Frame(info_frame, bg='#f8f9fa')
-                    desc_frame.pack(fill=tk.X, pady=(5, 0))
-
-                    tk.Label(
-                        desc_frame,
-                        text="📄 Описание:",
-                        font=("Arial", 10, "bold"),
-                        bg='#f8f9fa',
-                        fg='#555'
-                    ).pack(anchor='w')
-
-                    desc_text = tk.Text(
-                        desc_frame,
-                        height=min(4, len(description.split('\n')) + 1),
-                        width=50,
-                        font=("Arial", 10),
-                        bg='#f8f9fa',
-                        fg='#666',
-                        wrap=tk.WORD,
-                        relief="flat",
-                        borderwidth=0
-                    )
-                    desc_text.pack(anchor='w', pady=(2, 0), fill=tk.X, expand=True)  # Расширяем по ширине
-                    desc_text.insert('1.0', description)
-                    desc_text.config(state='disabled')
-
-            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
+            # Ищем открытую карточку клиента
+            for widget in self.parent_frame.winfo_children():
+                if hasattr(widget, '_is_client_card') and widget._is_client_card:
+                    # Ищем notebook в карточке клиента
+                    for child in widget.winfo_children():
+                        if isinstance(child, ttk.Notebook):
+                            # Ищем вкладку контактов
+                            for tab_idx in range(child.index("end")):
+                                tab = child.winfo_children()[tab_idx]
+                                if hasattr(tab, '_is_contacts_tab') and tab._is_contacts_tab:
+                                    # Обновляем таблицу контактов
+                                    contacts_table = getattr(tab, '_contacts_table', None)
+                                    if contacts_table:
+                                        contacts_table.refresh()
+                                    return
+                            break
+                    break
         except Exception as e:
-            print(f"Ошибка при создании вкладки задач: {e}")
-            import traceback
-            traceback.print_exc()
-            tk.Label(
-                parent,
-                text=f"Ошибка загрузки задач: {str(e)}",
-                font=("Arial", 12),
-                fg="red",
-                bg='white'
-            ).pack(pady=30)
+            print(f"Ошибка обновления вкладки контактов: {e}")
 
-    def _create_task_for_client(self, client_id):
-        """Создать задачу для клиента"""
+    def _create_tasks_tab(self, parent, client_id, card_window):
+        """Вкладка 'Задачи'"""
+        # Добавляем метку для идентификации вкладки
+        parent._is_tasks_tab = True
+        parent._client_id = client_id
+        parent._card_window = card_window  # Сохраняем ссылку на окно
+        
+        # Создаем таблицу задач клиента
+        self.tasks_table = ClientTasksTable(parent, client_id, self.tasks_mgr, self.clients_mgr)
+        
+        # Сохраняем ссылку на таблицу для обновления
+        parent._tasks_table = self.tasks_table
+
+    def _refresh_tasks_table(self, parent_window):
+        """Обновить таблицу задач в карточке клиента"""
+        try:
+            # Ищем notebook в карточке клиента
+            notebook = None
+            for widget in parent_window.winfo_children():
+                if isinstance(widget, ttk.Notebook):
+                    notebook = widget
+                    break
+            
+            if notebook:
+                # Ищем вкладку "✅ Задачи"
+                for i in range(notebook.index("end")):
+                    tab_info = notebook.tab(i)
+                    tab_text = tab_info.get("text", "")
+                    if "Задачи" in tab_text:
+                        # Получаем виджет вкладки правильно
+                        tab_frames = notebook.winfo_children()
+                        if i < len(tab_frames):
+                            tab_frame = tab_frames[i]
+                            # Обновляем таблицу
+                            tasks_table = getattr(tab_frame, '_tasks_table', None)
+                            if tasks_table:
+                                tasks_table.refresh()
+                            return
+        except Exception as e:
+            print(f"Ошибка при обновлении таблицы задач: {e}")
+
+    def _open_task_card(self, task_id, parent_window):
+        """Открыть карточку задачи с возможностью отметить как выполненную"""
+        print(f"_open_task_card вызван с task_id={task_id}, parent_window={parent_window}, тип={type(parent_window)}")
+        
+        # Проверяем, не открыта ли уже карточка этой задачи
+        if task_id in self.task_card_dialogs:
+            existing_dialog = self.task_card_dialogs[task_id]
+            if existing_dialog and tk.Toplevel.winfo_exists(existing_dialog):
+                existing_dialog.lift()
+                existing_dialog.focus_force()
+                return
+        
         try:
             if not self.tasks_mgr:
                 from tkinter import messagebox
                 messagebox.showerror("Ошибка", "Менеджер задач не инициализирован")
                 return
 
-            # Получаем данные клиента
-            client_data = self.clients_mgr.get_by_id(client_id)
-            if not client_data:
+            # Получаем данные задачи
+            task_data = self.tasks_mgr.get_by_id(task_id)
+            if not task_data:
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", f"Задача с ID {task_id} не найдена")
                 return
 
-            # Пробуем использовать TasksView
-            try:
-                from views.tasks_view import TasksView
+            # Преобразуем данные задачи в словарь для удобной работы
+            if hasattr(task_data, '__dict__'):
+                # Если это объект с атрибутами
+                task_dict = {
+                    'id': getattr(task_data, 'id', task_id),
+                    'title': getattr(task_data, 'title', 'Без названия'),
+                    'status': getattr(task_data, 'status', 'Новая'),
+                    'priority': getattr(task_data, 'priority', 'Не указан'),
+                    'due_date': getattr(task_data, 'due_date', 'Не указан'),
+                    'created_at': getattr(task_data, 'created_at', 'Не указано'),
+                    'description': getattr(task_data, 'description', 'Нет описания')
+                }
+            elif isinstance(task_data, dict):
+                # Если это уже словарь
+                task_dict = task_data
+            else:
+                # Пробуем преобразовать в словарь
+                try:
+                    task_dict = dict(task_data)
+                except:
+                    task_dict = {
+                        'id': task_id,
+                        'title': str(task_data) if task_data else 'Без названия',
+                        'status': 'Новая',
+                        'priority': 'Не указан',
+                        'due_date': 'Не указан',
+                        'created_at': 'Не указано',
+                        'description': 'Нет описания'
+                    }
 
-                # Проверяем, есть ли статический метод
-                if hasattr(TasksView, 'create_task_for_client'):
-                    TasksView.create_task_for_client(
-                        parent=self.parent_frame,
-                        tasks_mgr=self.tasks_mgr,
-                        clients_mgr=self.clients_mgr,
-                        client_id=client_id
-                    )
-                else:
-                    # Пробуем создать экземпляр TasksView
-                    temp_frame = tk.Frame(self.parent_frame)
-                    temp_tasks_view = TasksView(
-                        parent_frame=temp_frame,
-                        tasks_mgr=self.tasks_mgr,
-                        clients_mgr=self.clients_mgr,
-                        # остальные менеджеры по необходимости
-                    )
+            # Создаем окно карточки задачи
+            task_window = tk.Toplevel(self.parent_frame)
+            task_window.title(f"Задача: {task_dict['title']}")
+            task_window.geometry("600x500")
+            task_window.configure(bg='white')
+            task_window.resizable(False, False)
+            
+            # Сохраняем ссылку на окно
+            self.task_card_dialogs[task_id] = task_window
+            
+            # Очищаем ссылку при закрытии
+            def on_dialog_close():
+                if task_id in self.task_card_dialogs:
+                    del self.task_card_dialogs[task_id]
+                task_window.destroy()
+            
+            task_window.protocol("WM_DELETE_WINDOW", on_dialog_close)
 
-                    # Пробуем разные методы
-                    if hasattr(temp_tasks_view, '_show_add_dialog_with_client'):
-                        temp_tasks_view._show_add_dialog_with_client(client_id)
-                    elif hasattr(temp_tasks_view, '_show_add_dialog'):
-                        # Создаем диалог с передачей client_id
-                        self._create_simple_task_dialog(client_id, client_data)
-                    else:
-                        self._create_simple_task_dialog(client_id, client_data)
+            # Заголовок
+            header = tk.Frame(task_window, bg='#333333', height=60)
+            header.pack(fill=tk.X)
+            header.pack_propagate(False)
 
-            except ImportError:
-                self._create_simple_task_dialog(client_id, client_data)
-            except Exception as e:
-                print(f"Ошибка при использовании TasksView: {e}")
-                self._create_simple_task_dialog(client_id, client_data)
+            tk.Label(
+                header,
+                text=f"📌 {task_dict['title']}",
+                font=("Arial", 18, "bold"),
+                fg="white",
+                bg='#333333'
+            ).pack(side=tk.LEFT, padx=20, pady=15)
+
+            tk.Label(
+                header,
+                text=f"ID: {task_id}",
+                font=("Arial", 12),
+                fg="#41a5be",
+                bg='#333333'
+            ).pack(side=tk.RIGHT, padx=20, pady=15)
+
+            # Основная информация
+            info_frame = tk.Frame(task_window, bg='white')
+            info_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+
+            # Статус
+            current_status = task_dict['status']
+            tk.Label(
+                info_frame,
+                text="Статус:",
+                font=("Arial", 12, "bold"),
+                bg='white'
+            ).grid(row=0, column=0, sticky='w', pady=5)
+
+            status_frame = tk.Frame(info_frame, bg='white')
+            status_frame.grid(row=0, column=1, sticky='w', pady=5)
+
+            status_var = tk.StringVar(value=current_status)
+            status_options = ["Активная", "Выполнена"]
+            
+            for option in status_options:
+                tk.Radiobutton(
+                    status_frame,
+                    text=option,
+                    variable=status_var,
+                    value=option,
+                    font=("Arial", 10),
+                    bg='white'
+                ).pack(side=tk.LEFT, padx=5)
+
+            # Приоритет
+            priority = task_dict['priority']
+            self._add_info_row(info_frame, "Приоритет:", priority, 1)
+
+            # Срок выполнения
+            due_date = task_dict['due_date']
+            self._add_info_row(info_frame, "Срок выполнения:", due_date, 2)
+
+            # Дата создания
+            created_at = task_dict['created_at']
+            self._add_info_row(info_frame, "Дата создания:", created_at, 3)
+
+            # Описание
+            tk.Label(
+                info_frame,
+                text="Описание:",
+                font=("Arial", 12, "bold"),
+                bg='white'
+            ).grid(row=4, column=0, sticky='nw', pady=5)
+
+            desc_text = tk.Text(
+                info_frame,
+                width=40,
+                height=8,
+                font=("Arial", 10),
+                wrap=tk.WORD
+            )
+            desc_text.grid(row=4, column=1, sticky='w', pady=5)
+            desc_text.insert('1.0', task_dict['description'])
+            # Оставляем поле редактируемым
+
+            # Кнопки внизу
+            buttons_container = tk.Frame(task_window, bg='#f0f0f0', height=80)
+            buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
+            buttons_container.pack_propagate(False)
+
+            buttons_frame = tk.Frame(buttons_container, bg='#f0f0f0')
+            buttons_frame.pack(pady=15)
+
+            def save_task():
+                """Сохранить изменения в задаче"""
+                try:
+                    print("Начинаем сохранение задачи...")
+                    new_status = status_var.get()
+                    new_description = desc_text.get('1.0', tk.END).strip()
+                    print(f"Новый статус: {new_status}, новое описание: {new_description[:50]}...")
+                    
+                    # Обновляем статус
+                    self.tasks_mgr.update_status(task_id, new_status)
+                    print("Статус обновлен в базе данных")
+                    
+                    # Обновляем описание если оно изменилось
+                    if new_description != task_dict['description']:
+                        # Проверяем, есть ли метод обновления описания
+                        if hasattr(self.tasks_mgr, 'update_description'):
+                            self.tasks_mgr.update_description(task_id, new_description)
+                        else:
+                            # Получаем текущие данные задачи
+                            current_task = self.tasks_mgr.get_by_id(task_id)
+                            if current_task:
+                                # Обновляем через общий метод с обязательными параметрами
+                                self.tasks_mgr.update(
+                                    task_id,
+                                    title=getattr(current_task, 'title', ''),
+                                    due_date=getattr(current_task, 'due_date', ''),
+                                    client_id=getattr(current_task, 'client_id', ''),
+                                    description=new_description
+                                )
+                        print("Описание обновлено")
+                    
+                    from tkinter import messagebox
+                    messagebox.showinfo("Успех", f"Задача сохранена. Статус: {new_status}")
+                    task_window.destroy()
+                    
+                    # Обновляем таблицу задач в карточке клиента
+                    self._refresh_tasks_table(parent_window)
+                    
+                    # Поднимаем окно карточки клиента на передний план
+                    parent_window.lift()
+                    parent_window.focus_force()
+                    
+                except Exception as e:
+                    from tkinter import messagebox
+                    messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}")
+                    print(f"Ошибка при сохранении: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            def mark_completed():
+                """Отметить задачу как выполненную"""
+                status_var.set("Выполнена")
+                save_task()
+
+            tk.Button(
+                buttons_frame,
+                text="💾 Сохранить",
+                command=save_task,
+                bg="#41a5be",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                relief="flat",
+                width=15,
+                height=1,
+                cursor="hand2"
+            ).pack(side=tk.LEFT, padx=10)
+
+            tk.Button(
+                buttons_frame,
+                text="✅ Выполнено",
+                command=mark_completed,
+                bg="#28a745",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                relief="flat",
+                width=15,
+                height=1,
+                cursor="hand2"
+            ).pack(side=tk.LEFT, padx=10)
+
+            tk.Button(
+                buttons_frame,
+                text="Закрыть",
+                command=task_window.destroy,
+                bg="#6c757d",
+                fg="white",
+                font=("Arial", 12, "bold"),
+                relief="flat",
+                width=15,
+                height=1,
+                cursor="hand2"
+            ).pack(side=tk.LEFT, padx=10)
 
         except Exception as e:
-            print(f"Ошибка при создании задачи: {e}")
+            print(f"Ошибка при открытии карточки задачи: {e}")
             from tkinter import messagebox
-            messagebox.showerror("Ошибка", f"Не удалось создать задачу: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось открыть карточку задачи: {e}")
 
-    def _create_simple_task_dialog(self, client_id, client_data):
-        """Создать простой диалог для задачи, если TasksView недоступен"""
-        from tkinter import simpledialog
-        from tkinter import messagebox
+    def _update_specific_task(self, parent_window, task_id, new_status):
+        """Обновить только конкретную задачу в карточке клиента без пересоздания вкладки"""
+        try:
+            print(f"Ищем задачу {task_id} для обновления статуса на '{new_status}'")
+            
+            # Ищем notebook в карточке клиента
+            notebook = None
+            for widget in parent_window.winfo_children():
+                if isinstance(widget, ttk.Notebook):
+                    notebook = widget
+                    print("Найден notebook")
+                    break
+            
+            if notebook:
+                # Ищем вкладку "✅ Задачи"
+                for i in range(notebook.index("end")):
+                    tab_info = notebook.tab(i)
+                    tab_text = tab_info.get("text", "")
+                    print(f"Вкладка {i}: '{tab_text}'")
+                    if "Задачи" in tab_text:
+                        # Получаем виджет вкладки правильно
+                        tab_frames = notebook.winfo_children()
+                        if i < len(tab_frames):
+                            tab_frame = tab_frames[i]
+                            print(f"Получен фрейм вкладки: {tab_frame}")
+                            
+                            # Используем сохраненное card_window из вкладки
+                            card_window = getattr(tab_frame, '_card_window', None)
+                            if card_window:
+                                print(f"Используем сохраненное card_window: {card_window}")
+                                # Ищем и обновляем задачу
+                                self._find_and_update_task(card_window, task_id, new_status)
+                            else:
+                                print("card_window не найден во вкладке!")
+                            return
+            print("Не удалось найти задачу для обновления")
+        except Exception as e:
+            print(f"Ошибка при обновлении конкретной задачи: {e}")
+            import traceback
+            traceback.print_exc()
 
-        title = simpledialog.askstring("Новая задача", "Введите название задачи:")
-        if title:
-            try:
-                self.tasks_mgr.add(
-                    title=title,
-                    client_id=client_id,
-                    # остальные параметры по умолчанию
-                )
-                messagebox.showinfo("Успех", f"Задача '{title}' создана для клиента {client_data['company']}")
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось создать задачу: {e}")
+    def _find_and_update_task(self, card_window, task_id, new_status):
+        """Найти и обновить конкретную задачу в окне"""
+        try:
+            print(f"Поиск задачи {task_id} в окне {card_window}")
+            
+            # Ищем notebook в карточке клиента
+            notebook = None
+            for widget in card_window.winfo_children():
+                if isinstance(widget, ttk.Notebook):
+                    notebook = widget
+                    print("Найден notebook в card_window")
+                    break
+            
+            if notebook:
+                # Ищем вкладку "✅ Задачи"
+                for i in range(notebook.index("end")):
+                    tab_info = notebook.tab(i)
+                    tab_text = tab_info.get("text", "")
+                    if "Задачи" in tab_text:
+                        # Получаем виджет вкладки правильно
+                        tab_frames = notebook.winfo_children()
+                        if i < len(tab_frames):
+                            tab_frame = tab_frames[i]
+                            
+                            # Ищем canvas в вкладке задач
+                            for widget in tab_frame.winfo_children():
+                                if isinstance(widget, tk.Canvas):
+                                    # Ищем фрейм задачи по ID
+                                    for child in widget.winfo_children():
+                                        if isinstance(child, tk.Frame) and hasattr(child, '_task_id'):
+                                            if getattr(child, '_task_id') == task_id:
+                                                print("Найден нужный фрейм задачи!")
+                                                # Обновляем статус в виджете
+                                                self._update_task_status_in_widget(child, new_status)
+                                                print("Статус обновлен успешно!")
+                                                return
+                        return
+            print("Задача не найдена для обновления")
+        except Exception as e:
+            print(f"Ошибка при поиске и обновлении задачи: {e}")
 
-    def _add_info_row(self, parent, label, value, row):
-        """Добавить строку информации"""
-        tk.Label(
-            parent,
-            text=label,
-            font=("Arial", 12, "bold"),
-            bg='white'
-        ).grid(row=row, column=0, sticky='w', padx=10, pady=10)
+    def _update_task_status_in_widget(self, task_frame, new_status):
+        """Обновить статус в конкретном виджете задачи"""
+        try:
+            print(f"Обновляем статус в виджете: {new_status}")
+            # Ищем метку статуса в фрейме задачи
+            for widget in task_frame.winfo_children():
+                print(f"Проверяем виджет в фрейме: {widget}, тип: {type(widget)}")
+                if isinstance(widget, tk.Frame):
+                    print("Найден внутренний фрейм")
+                    # Ищем в дочерних элементах
+                    for child in widget.winfo_children():
+                        print(f"Проверяем дочерний элемент: {child}, тип: {type(child)}, hasattr _is_status_label: {hasattr(child, '_is_status_label')}")
+                        if isinstance(child, tk.Label) and hasattr(child, '_is_status_label'):
+                            print("Найдена метка статуса!")
+                            # Обновляем текст и цвет статуса
+                            status_colors = {
+                                'Новая': '#17a2b8',
+                                'В работе': '#007bff', 
+                                'Выполнена': '#28a745',
+                                'Отложена': '#6c757d',
+                                'Отменена': '#dc3545'
+                            }
+                            
+                            old_text = child.cget("text")
+                            old_bg = child.cget("bg")
+                            print(f"Старый статус: '{old_text}', старый цвет: {old_bg}")
+                            
+                            child.config(
+                                text=new_status,
+                                bg=status_colors.get(new_status, '#6c757d')
+                            )
+                            
+                            new_text = child.cget("text")
+                            new_bg = child.cget("bg")
+                            print(f"Новый статус: '{new_text}', новый цвет: {new_bg}")
+                            return
+            print("Метка статуса не найдена во фрейме")
+        except Exception as e:
+            print(f"Ошибка при обновлении статуса в виджете: {e}")
+            import traceback
+            traceback.print_exc()
 
-        tk.Label(
-            parent,
-            text=value,
-            font=("Arial", 12),
-            bg='white',
-            fg='#666'
-        ).grid(row=row, column=1, sticky='w', padx=10, pady=10)
-
-    def _delete_client(self, client):
-        """Удалить клиента"""
-        from utils.helpers import show_confirmation, show_message
-
-        confirm = show_confirmation(
-            self.parent_frame,
-            "Подтверждение удаления",
-            f"Удалить клиента '{client['company']}'?\n\nЭто действие нельзя отменить!"
-        )
-
-        if confirm:
-            try:
-                self.clients_mgr.delete(client['id'])
-                show_message(self.parent_frame, "Успех", f"Клиент '{client['company']}' удалён", "success")
-                # Автоматически обновляем список
-                self._update_table_data()
-            except Exception as e:
-                show_message(self.parent_frame, "Ошибка", f"Не удалось удалить:\n{e}", "error")
-
-    def _delete_client_from_card(self, client, card_window):
-        """Удалить клиента из карточки"""
-        from utils.helpers import show_confirmation, show_message
-
-        # ← Передаём ГЛАВНОЕ ОКНО вместо card_window
-        confirm = show_confirmation(
-            self.parent_frame.master,  # ← ИЗМЕНЕНО! Было: card_window
-            "Подтверждение удаления",
-            f"Вы действительно хотите удалить клиента:\n\n{client['company']}?\n\nЭто действие нельзя отменить!\n\nБудут удалены:\n• Все контактные лица\n• Все email адреса\n• Вся история взаимодействий"
-        )
-
-        if confirm:
-            try:
-                self.clients_mgr.delete(client['id'])
-                show_message(
-                    self.parent_frame.master,  # ← ИЗМЕНЕНО!
-                    "Успех",
-                    f"Клиент '{client['company']}' удалён из базы данных",
-                    "success"
-                )
-
-                # Закрываем карточку
-                card_window.destroy()
-
-                # Автоматически обновляем список
-                self._update_table_data()
-
-            except Exception as e:
-                show_message(
-                    self.parent_frame.master,  # ← ИЗМЕНЕНО!
-                    "Ошибка",
-                    f"Не удалось удалить клиента:\n{e}",
-                    "error"
-                )
-
-    def _on_tree_enter(self, event):
-        """При входе в Treeview"""
-        pass
-
-    def _on_tree_leave(self, event):
-        """При выходе из Treeview"""
-        # Снимаем подсветку со всех строк
-        for item in self.tree.get_children():
-            self.tree.item(item, tags=(self.tree.item(item, 'tags')[0],))
-
-    def _on_tree_motion(self, event):
-        """При движении мыши над Treeview"""
-        # Определяем, над какой строкой находится курсор
-        item_id = self.tree.identify_row(event.y)
-        if item_id:
-            # Снимаем подсветку со всех строк
-            for item in self.tree.get_children():
-                tags = list(self.tree.item(item, 'tags'))
-                if 'selected' in tags:
-                    tags.remove('selected')
-                self.tree.item(item, tags=tuple(tags))
-
-            # Подсвечиваем текущую строку
-            tags = list(self.tree.item(item_id, 'tags'))
-            if 'selected' not in tags:
-                tags.append('selected')
-            self.tree.item(item_id, tags=tuple(tags))
+    def _refresh_tasks_tab(self, parent_window=None):
+        """Обновить вкладку задач в карточке клиента"""
+        try:
+            if parent_window is None:
+                # Ищем открытую карточку клиента
+                for widget in self.parent_frame.winfo_children():
+                    if hasattr(widget, '_is_client_card') and widget._is_client_card:
+                        parent_window = widget
+                        break
+            
+            if parent_window is None:
+                return
+                
+            # Ищем notebook в карточке клиента
+            notebook = None
+            for widget in parent_window.winfo_children():
+                if isinstance(widget, ttk.Notebook):
+                    notebook = widget
+                    break
+            
+            if notebook:
+                # Ищем вкладку "✅ Задачи"
+                for i in range(notebook.index("end")):
+                    tab_info = notebook.tab(i)
+                    tab_text = tab_info.get("text", "")
+                    if "Задачи" in tab_text:
+                        # Получаем tab_id
+                        tab_id = notebook.tab(i, "text")
+                        # Получаем вкладку
+                        tab_frame = notebook.nametowidget(tab_id)
+                        # Получаем client_id из метки
+                        client_id = getattr(tab_frame, '_client_id', None)
+                        if client_id:
+                            # Очищаем и пересоздаем вкладку задач
+                            for tab_child in tab_frame.winfo_children():
+                                tab_child.destroy()
+                            self._create_tasks_tab(tab_frame, client_id)
+                        return
+        except Exception as e:
+            print(f"Ошибка при обновлении вкладки задач: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _add_contact_to_client(self, client_id, parent_window):
-        """Добавить контактное лицо к клиенту"""
+        """Добавить контактное лицо к клиенту в общей стилистике"""
+        # Проверяем, не открыто ли уже окно добавления контакта для этого клиента
+        if client_id in self.add_contact_dialogs:
+            existing_dialog = self.add_contact_dialogs[client_id]
+            if existing_dialog and tk.Toplevel.winfo_exists(existing_dialog):
+                existing_dialog.lift()
+                existing_dialog.focus_force()
+                return
+        
         from utils.helpers import show_message
 
         dialog = tk.Toplevel(parent_window)
         dialog.title("Добавить контактное лицо")
-        dialog.geometry("500x400")
+        dialog.geometry("500x450")
         dialog.configure(bg='white')
+        dialog.resizable(False, False)
+        
+        # Сохраняем ссылку на окно
+        self.add_contact_dialogs[client_id] = dialog
+        
+        # Очищаем ссылку при закрытии
+        def on_dialog_close():
+            if client_id in self.add_contact_dialogs:
+                del self.add_contact_dialogs[client_id]
+            dialog.destroy()
+        
+        dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
 
+        # Заголовок
+        header = tk.Frame(dialog, bg='#333333', height=60)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        
         tk.Label(
-            dialog,
-            text="Добавить контактное лицо",
-            font=("Arial", 16, "bold"),
-            bg='white'
-        ).pack(pady=20)
+            header,
+            text="👤 Добавить контактное лицо",
+            font=("Arial", 18, "bold"),
+            fg='white',
+            bg='#333333'
+        ).pack(pady=15)
 
         # Поля для ввода
         fields_frame = tk.Frame(dialog, bg='white')
-        fields_frame.pack(padx=30, pady=10)
+        fields_frame.pack(fill=tk.BOTH, expand=True, padx=30, pady=20)
 
-        tk.Label(fields_frame, text="ФИО *", font=("Arial", 10), bg='white').pack(anchor='w')
-        name_entry = tk.Entry(fields_frame, font=("Arial", 11), width=40)
+        tk.Label(fields_frame, text="ФИО *", font=("Arial", 10, "bold"), bg='white').pack(anchor='w')
+        name_entry = tk.Entry(
+            fields_frame, 
+            font=("Arial", 11), 
+            width=40,
+            relief="solid",
+            borderwidth=1
+        )
         name_entry.pack(fill=tk.X, pady=(5, 15))
 
-        tk.Label(fields_frame, text="Должность", font=("Arial", 10), bg='white').pack(anchor='w')
-        position_entry = tk.Entry(fields_frame, font=("Arial", 11), width=40)
+        tk.Label(fields_frame, text="Должность", font=("Arial", 10, "bold"), bg='white').pack(anchor='w')
+        position_entry = tk.Entry(
+            fields_frame, 
+            font=("Arial", 11), 
+            width=40,
+            relief="solid",
+            borderwidth=1
+        )
         position_entry.pack(fill=tk.X, pady=(5, 15))
 
-        tk.Label(fields_frame, text="Телефон", font=("Arial", 10), bg='white').pack(anchor='w')
-        phone_entry = tk.Entry(fields_frame, font=("Arial", 11), width=40)
+        tk.Label(fields_frame, text="Телефон", font=("Arial", 10, "bold"), bg='white').pack(anchor='w')
+        phone_entry = tk.Entry(
+            fields_frame, 
+            font=("Arial", 11), 
+            width=40,
+            relief="solid",
+            borderwidth=1
+        )
         phone_entry.pack(fill=tk.X, pady=(5, 15))
 
-        tk.Label(fields_frame, text="Email", font=("Arial", 10), bg='white').pack(anchor='w')
-        email_entry = tk.Entry(fields_frame, font=("Arial", 11), width=40)
+        tk.Label(fields_frame, text="Email", font=("Arial", 10, "bold"), bg='white').pack(anchor='w')
+        email_entry = tk.Entry(
+            fields_frame, 
+            font=("Arial", 11), 
+            width=40,
+            relief="solid",
+            borderwidth=1
+        )
         email_entry.pack(fill=tk.X, pady=(5, 15))
 
-        # Кнопки
-        buttons_frame = tk.Frame(dialog, bg='white')
-        buttons_frame.pack(pady=20)
+        # Кнопки внизу
+        buttons_container = tk.Frame(dialog, bg='#f0f0f0', height=80)
+        buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
+        buttons_container.pack_propagate(False)
+
+        buttons_frame = tk.Frame(buttons_container, bg='#f0f0f0')
+        buttons_frame.pack(pady=15)
 
         def save_contact():
             name = name_entry.get().strip()
             if not name:
-                show_message(dialog, "Ошибка", "Введите ФИО контактного лица", "error")
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", "Введите ФИО контактного лица")
                 return
 
             try:
@@ -1924,13 +2322,16 @@ class ClientsView(BaseView):
                 if email and self.contact_emails_mgr:
                     self.contact_emails_mgr.add(contact_id, email, True)
 
-                show_message(dialog, "Успех", "Контактное лицо добавлено", "success")
+                from tkinter import messagebox
+                messagebox.showinfo("Успех", "Контактное лицо добавлено")
                 dialog.destroy()
-                parent_window.destroy()
-                self._open_client_card_by_id(client_id)
+                
+                # Обновляем вкладку контактов
+                self._refresh_contacts_tab()
 
             except Exception as e:
-                show_message(dialog, "Ошибка", f"Не удалось добавить контакт: {e}", "error")
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", f"Не удалось добавить контакт: {e}")
 
         tk.Button(
             buttons_frame,
@@ -1938,9 +2339,11 @@ class ClientsView(BaseView):
             command=save_contact,
             bg="#41a5be",
             fg="white",
-            font=("Arial", 11),
-            padx=20,
-            pady=8
+            font=("Arial", 12, "bold"),
+            relief="flat",
+            width=15,
+            height=1,
+            cursor="hand2"
         ).pack(side=tk.LEFT, padx=10)
 
         tk.Button(
@@ -1949,15 +2352,17 @@ class ClientsView(BaseView):
             command=dialog.destroy,
             bg="#6c757d",
             fg="white",
-            font=("Arial", 11),
-            padx=20,
-            pady=8
-        ).pack(side=tk.LEFT, padx=10, pady=10)
+            font=("Arial", 12, "bold"),
+            relief="flat",
+            width=15,
+            height=1,
+            cursor="hand2"
+        ).pack(side=tk.LEFT, padx=10)
 
-        name_entry.focus()
+        name_entry.focus_set()
 
-    def _edit_client(self, client, parent_window):
-        """Редактировать клиента с объединенными email в контактах"""
+    def _edit_client_OLD(self, client, parent_window):
+        """Редактировать клиента с объединенными email в контактах - СТАРЫЙ МЕТОД"""
 
         edit_dialog = tk.Toplevel(parent_window)
         edit_dialog.title(f"Редактирование: {client['company']}")
@@ -1987,10 +2392,24 @@ class ClientsView(BaseView):
         # Получаем данные клиента
         client_data = self.clients_mgr.get_by_id(client['id'])
         contacts_db = self.contact_persons_mgr.get_by_client(client['id'])
+        
+        # Отладочная информация
+        print(f"Загрузка контактов для клиента {client['id']}:")
+        print(f"client_data: {client_data}")
+        print(f"contacts_db: {contacts_db}")
+        print(f"Тип contacts_db: {type(contacts_db)}")
+        if contacts_db:
+            print(f"Количество контактов: {len(contacts_db)}")
+            for i, contact in enumerate(contacts_db):
+                print(f"Контакт {i}: {contact}, тип: {type(contact)}")
 
-        # Canvas для прокрутки
-        canvas = tk.Canvas(edit_dialog, bg='white', highlightthickness=0)
-        scrollbar = tk.Scrollbar(edit_dialog, orient="vertical", command=canvas.yview)
+        # Создаем контейнер для контента между заголовком и кнопками
+        content_container = tk.Frame(edit_dialog, bg='white')
+        content_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Canvas для прокрутки внутри контейнера
+        canvas = tk.Canvas(content_container, bg='white', highlightthickness=0)
+        scrollbar = tk.Scrollbar(content_container, orient="vertical", command=canvas.yview)
         scrollable_content = tk.Frame(canvas, bg='white')
 
         scrollable_content.bind(
@@ -2007,6 +2426,9 @@ class ClientsView(BaseView):
 
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Добавляем поддержку прокрутки колесиком мыши
+        self._add_mouse_wheel_support(canvas)
 
         # --- ОСНОВНАЯ ИНФОРМАЦИЯ ---
         tk.Label(
@@ -2094,10 +2516,12 @@ class ClientsView(BaseView):
 
         contacts_container = tk.Frame(scrollable_content, bg='white')
         contacts_container.pack(fill=tk.X, padx=20, pady=(0, 10))
+        print("Раздел контактов создан")
 
         # Переменные для хранения виджетов
         contact_widgets = []
         primary_contact_var = tk.IntVar()
+        print("Переменные для контактов инициализированы")
 
         def update_contact_ui():
             """Обновляет интерфейс контактов"""
@@ -2114,6 +2538,8 @@ class ClientsView(BaseView):
 
         def create_contact_widget(contact_data=None):
             """Создает виджет для контактного лица с email"""
+            print(f"create_contact_widget вызван с contact_data: {contact_data}")
+            
             # Проверяем лимит
             active_widgets = [w for w in contact_widgets if not w.get('deleted', False)]
             if len(active_widgets) >= 4:
@@ -2122,10 +2548,12 @@ class ClientsView(BaseView):
                 return None
 
             idx = len(active_widgets)
+            print(f"Создаем контакт с индексом {idx}")
 
             # Контейнер для контакта
             contact_box = tk.Frame(contacts_container, bg='#f8f9fa', relief='solid', bd=1)
             contact_box.pack(fill=tk.X, pady=5)
+            print("Контейнер для контакта создан и упакован")
 
             # Заголовок
             header_frame = tk.Frame(contact_box, bg='#f8f9fa')
@@ -2319,11 +2747,20 @@ class ClientsView(BaseView):
             return contact_data_widget
 
         # Загружаем существующие контакты
-        for contact in contacts_db:
-            create_contact_widget(contact)
+        loaded_contacts = 0
+        if contacts_db:
+            print(f"Начинаем загрузку {len(contacts_db)} контактов")
+            for contact in contacts_db:
+                print(f"Создаем виджет для контакта: {contact}")
+                widget = create_contact_widget(contact)
+                if widget:
+                    loaded_contacts += 1
+        else:
+            print("Контакты не найдены в базе данных")
 
-        # Если контактов нет - создаем пустой
-        if not contacts_db:
+        # Всегда создаем хотя бы один пустой виджет для редактирования
+        if loaded_contacts == 0:
+            print("Создаем пустой виджет для нового контакта")
             create_contact_widget()
 
         # Кнопка добавления контакта
@@ -2335,6 +2772,13 @@ class ClientsView(BaseView):
             fg="white",
             font=("Arial", 10)
         ).pack(pady=5)
+        
+        print(f"Раздел контактов завершен. Загружено: {loaded_contacts} контактов")
+
+        # Обновляем scrollregion после создания всех элементов
+        canvas.update_idletasks()
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        print("Scrollregion обновлен")
 
         # --- ФУНКЦИЯ СОХРАНЕНИЯ ---
         def save_changes():
@@ -2413,7 +2857,7 @@ class ClientsView(BaseView):
                 # Закрываем окна и обновляем данные
                 edit_dialog.destroy()
                 parent_window.destroy()
-                self._update_table_data()
+                self._refresh_data()
 
                 # Открываем обновленную карточку клиента
                 updated_client = self.clients_mgr.get_by_id(client['id'])
@@ -2474,53 +2918,402 @@ class ClientsView(BaseView):
         # Фокус на поле компании
         company_entry.focus_set()
         company_entry.select_range(0, tk.END)
+        
+        print("Метод _edit_client завершен")
 
-    def _on_task_double_click(self, event):
-        """Обработка двойного клика по задаче"""
-        try:
-            item = self.tree.identify_row(event.y)
-            if not item:
-                return
+    def _refresh_client_card(self):
+        """Обновить данные в карточке клиента (для перезагрузки вкладок)"""
+        # Эта функция может быть использована для обновления данных в открытой карточке
+        pass
 
-            values = self.tree.item(item, 'values')
-            if values and len(values) > 0:
-                # Находим ID задачи через название
-                task_title = values[1]  # Название задачи
-                # Нужно будет доработать поиск по названию
-                # или хранить ID в скрытой колонке
-                self._show_edit_dialog_by_title(task_title)
-        except Exception as e:
-            print(f"Ошибка при двойном клике: {e}")
-
-    def _edit_task(self, task_id, parent_window):
-        """Редактировать задачу"""
-        # Здесь можно реализовать редактирование задачи
-        # Это может быть отдельный диалог или вызов метода из TasksView
-        from tkinter import messagebox
-        messagebox.showinfo("Редактирование", f"Редактирование задачи {task_id}")
-        # Для полной реализации нужно интегрировать с TasksView
-
-    def _complete_task(self, task_id, parent_window):
-        """Завершить задачу"""
+    def _delete_client_from_card(self, client, card_window):
+        """Удалить клиента из карточки"""
         from utils.helpers import show_confirmation, show_message
 
+        # ← Передаём ГЛАВНОЕ ОКНО вместо card_window
         confirm = show_confirmation(
-            parent_window,
-            "Завершение задачи",
-            "Вы уверены, что хотите отметить задачу как выполненную?"
+            self.parent_frame.master,  # ← ИЗМЕНЕНО! Было: card_window
+            "Подтверждение удаления",
+            f"Вы действительно хотите удалить клиента:\n\n{client['company']}?\n\nЭто действие нельзя отменить!\n\nБудут удалены:\n• Все контактные лица\n• Все email адреса\n• Вся история взаимодействий"
         )
 
-        if confirm and self.tasks_mgr:
+        if confirm:
             try:
-                # Обновляем статус задачи
-                success = self.tasks_mgr.update_status(task_id, 'Выполнена')
-                if success:
-                    show_message(parent_window, "Успех", "Задача отмечена как выполненная", "success")
-                    parent_window.destroy()
-                else:
-                    show_message(parent_window, "Ошибка", "Не удалось обновить статус задачи", "error")
+                self.clients_mgr.delete(client['id'])
+                show_message(
+                    self.parent_frame.master,  # ← ИЗМЕНЕНО!
+                    "Успех",
+                    f"Клиент '{client['company']}' удалён из базы данных",
+                    "success"
+                )
+
+                # Закрываем карточку
+                card_window.destroy()
+
+                # Автоматически обновляем список
+                self._refresh_data()
+
             except Exception as e:
-                show_message(parent_window, "Ошибка", f"Не удалось завершить задачу: {e}", "error")
+                show_message(
+                    self.parent_frame.master,  # ← ИЗМЕНЕНО!
+                    "Ошибка",
+                    f"Не удалось удалить клиента:\n{e}",
+                    "error"
+                )
 
+    def _add_info_row(self, parent, label, value, row):
+        """Добавляет строку с информацией"""
+        tk.Label(
+            parent,
+            text=label,
+            font=("Arial", 12, "bold"),
+            bg='white'
+        ).grid(row=row, column=0, sticky='w', pady=5, padx=(0, 10))
 
+        tk.Label(
+            parent,
+            text=value,
+            font=("Arial", 12),
+            bg='white',
+            fg='#333'
+        ).grid(row=row, column=1, sticky='w', pady=5, padx=(0, 10))
 
+    def _edit_client(self, client, parent_window):
+        """Диалог редактирования клиента по примеру из раздела эксперты"""
+        try:
+            client_id = client['id']
+            client_data = self.clients_mgr.get_by_id(client_id)
+            if not client_data:
+                from tkinter import messagebox
+                messagebox.showerror("Ошибка", f"Клиент с ID {client_id} не найден")
+                return
+
+            dialog, content, buttons_frame = self._create_dialog(
+                f"✏️ Редактирование: {client_data.get('company', 'Клиент')}",
+                "750x750"
+            )
+
+            # Основная информация
+            main_fields = self._create_form_section(content, "📋 Основная информация", [
+                {
+                    'name': 'company',
+                    'label': 'Название компании',
+                    'type': 'entry',
+                    'required': True,
+                    'default': client_data.get('company', '')
+                },
+                {
+                    'name': 'address',
+                    'label': 'Адрес',
+                    'type': 'entry',
+                    'required': False,
+                    'default': client_data.get('address', '') or ''
+                },
+                {
+                    'name': 'notes',
+                    'label': 'Примечания',
+                    'type': 'text',
+                    'required': False,
+                    'height': 3,
+                    'default': client_data.get('notes', '') or ''
+                }
+            ])
+
+            # --- КОНТАКТНЫЕ ЛИЦА ---
+            contacts_header_frame = tk.Frame(content, bg='white')
+            contacts_header_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
+
+            tk.Label(
+                contacts_header_frame,
+                text="👥 Контактные лица",
+                font=("Arial", 14, "bold"),
+                bg='white',
+                fg='#333'
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                contacts_header_frame,
+                text="(до 4, выберите основной)",
+                font=("Arial", 10),
+                bg='white',
+                fg='#999'
+            ).pack(side=tk.LEFT, padx=10)
+
+            contacts_container = tk.Frame(content, bg='white')
+            contacts_container.pack(fill=tk.X, padx=20, pady=(0, 10))
+
+            contact_widgets = []
+            primary_contact_var = tk.IntVar(value=0)
+
+            def _active_contacts():
+                return [w for w in contact_widgets if not w.get('deleted', False)]
+
+            def update_primary_contact_ui():
+                selected_idx = primary_contact_var.get()
+
+                # если выбран удалённый контакт — сбросить на первый активный
+                if selected_idx < len(contact_widgets) and contact_widgets[selected_idx].get('deleted', False):
+                    for i, w in enumerate(contact_widgets):
+                        if not w.get('deleted', False):
+                            primary_contact_var.set(i)
+                            selected_idx = i
+                            break
+
+                for idx, widget in enumerate(contact_widgets):
+                    if widget.get('deleted', False):
+                        continue
+
+                    widget['radio'].config(text=f"Контакт #{idx + 1}")
+                    if idx == selected_idx:
+                        widget['primary_label'].config(text="ОСНОВНОЙ", fg="red", font=("Arial", 9, "bold"))
+                    else:
+                        widget['primary_label'].config(text="", fg="black", font=("Arial", 9))
+
+            def delete_contact_ui(widget):
+                widget['deleted'] = True
+                widget['box'].pack_forget()
+                update_primary_contact_ui()
+
+            def create_contact_fields(contact_data=None):
+                active_widgets = _active_contacts()
+                if len(active_widgets) >= 4:
+                    from tkinter import messagebox
+                    messagebox.showwarning("Лимит", "Максимум 4 контактных лица")
+                    return None
+
+                idx = len(contact_widgets)
+
+                contact_box = tk.Frame(contacts_container, bg='#f8f9fa', relief="ridge", borderwidth=1)
+                contact_box.pack(fill=tk.X, pady=5)
+
+                top_frame = tk.Frame(contact_box, bg='#f8f9fa')
+                top_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
+
+                radio_btn = tk.Radiobutton(
+                    top_frame,
+                    text=f"Контакт #{idx + 1}",
+                    variable=primary_contact_var,
+                    value=idx,
+                    bg='#f8f9fa',
+                    font=("Arial", 9, "bold"),
+                    command=update_primary_contact_ui
+                )
+                radio_btn.pack(side=tk.LEFT)
+
+                primary_label = tk.Label(top_frame, text="", fg="red", font=("Arial", 9, "bold"), bg='#f8f9fa')
+                primary_label.pack(side=tk.LEFT, padx=(5, 0))
+
+                fields_frame = tk.Frame(contact_box, bg='#f8f9fa')
+                fields_frame.pack(fill=tk.X, padx=10, pady=5)
+
+                tk.Label(fields_frame, text="ФИО:", font=("Arial", 9), bg='#f8f9fa').pack(anchor='w')
+                name_entry = tk.Entry(fields_frame, font=("Arial", 10), relief="solid", borderwidth=1)
+                name_entry.pack(fill=tk.X, pady=2, ipady=3)
+
+                tk.Label(fields_frame, text="Должность:", font=("Arial", 9), bg='#f8f9fa').pack(anchor='w')
+                position_entry = tk.Entry(fields_frame, font=("Arial", 10), relief="solid", borderwidth=1)
+                position_entry.pack(fill=tk.X, pady=2, ipady=3)
+
+                tk.Label(fields_frame, text="Телефон:", font=("Arial", 9), bg='#f8f9fa').pack(anchor='w')
+                phone_entry = tk.Entry(fields_frame, font=("Arial", 10), relief="solid", borderwidth=1)
+                phone_entry.pack(fill=tk.X, pady=2, ipady=3)
+
+                tk.Label(fields_frame, text="Email:", font=("Arial", 9), bg='#f8f9fa').pack(anchor='w')
+                email_entry = tk.Entry(fields_frame, font=("Arial", 10), relief="solid", borderwidth=1)
+                email_entry.pack(fill=tk.X, pady=2, ipady=3)
+
+                contact_widget = {
+                    'id': None,
+                    'deleted': False,
+                    'box': contact_box,
+                    'name': name_entry,
+                    'position': position_entry,
+                    'phone': phone_entry,
+                    'email': email_entry,
+                    'radio': radio_btn,
+                    'primary_label': primary_label
+                }
+
+                tk.Button(
+                    top_frame,
+                    text="Удалить",
+                    command=lambda w=contact_widget: delete_contact_ui(w),
+                    bg="#d9534f",
+                    fg="white",
+                    font=("Arial", 9, "bold"),
+                    relief="flat",
+                    cursor="hand2"
+                ).pack(side=tk.RIGHT)
+
+                # заполнение из БД
+                if contact_data:
+                    contact_widget['id'] = contact_data.get('id')
+                    name_entry.insert(0, contact_data.get('full_name', '') or '')
+                    position_entry.insert(0, contact_data.get('position', '') or '')
+                    phone_entry.insert(0, contact_data.get('phone', '') or '')
+                    email_entry.insert(0, contact_data.get('email', '') or '')
+
+                contact_widgets.append(contact_widget)
+
+                # выставляем основной контакт
+                if contact_data and contact_data.get('is_primary'):
+                    primary_contact_var.set(idx)
+
+                update_primary_contact_ui()
+                return contact_widget
+
+            add_contact_btn = tk.Button(
+                contacts_container,
+                text="+ Добавить контакт",
+                command=lambda: create_contact_fields(),
+                bg="#28a745",
+                fg="white",
+                font=("Arial", 10),
+                cursor="hand2"
+            )
+            add_contact_btn.pack(pady=5)
+
+            # загрузка существующих контактов
+            contacts_db = self.contact_persons_mgr.get_by_client(client_id)
+            if contacts_db:
+                # Загружаем email для каждого контакта
+                contacts_with_email = []
+                for contact in contacts_db:
+                    contact_dict = dict(contact) if hasattr(contact, 'keys') else contact
+                    # Загружаем email для контакта
+                    if self.contact_emails_mgr:
+                        try:
+                            emails = self.contact_emails_mgr.get_by_contact(contact_dict['id'])
+                            if emails:
+                                email_dict = dict(emails[0]) if hasattr(emails[0], 'keys') else emails[0]
+                                contact_dict['email'] = email_dict.get('email', '')
+                            else:
+                                contact_dict['email'] = ''
+                        except Exception as e:
+                            print(f"Ошибка загрузки email для контакта {contact_dict['id']}: {e}")
+                            contact_dict['email'] = ''
+                    else:
+                        contact_dict['email'] = ''
+                    contacts_with_email.append(contact_dict)
+                
+                for c in contacts_with_email:
+                    create_contact_fields(c)
+            else:
+                create_contact_fields()
+
+            def save():
+                try:
+                    company = main_fields['company'].get().strip()
+                    if not company:
+                        from tkinter import messagebox
+                        messagebox.showerror("Ошибка", "Укажите название компании")
+                        return
+
+                    address = main_fields['address'].get().strip()
+                    notes = main_fields['notes'].get('1.0', tk.END).strip()
+
+                    # Обновляем основную информацию клиента
+                    self.clients_mgr.update(client_id, company, address, notes)
+
+                    # Обрабатываем контакты
+                    contacts_payload = []
+                    for idx, w in enumerate(contact_widgets):
+                        if w.get('deleted', False):
+                            continue
+
+                        full_name = w['name'].get().strip()
+                        position = w['position'].get().strip()
+                        phone = w['phone'].get().strip()
+                        email = w['email'].get().strip()
+
+                        if not full_name:
+                            # пустые контакты не сохраняем
+                            continue
+
+                        contacts_payload.append({
+                            'id': w.get('id'),
+                            'full_name': full_name,
+                            'position': position,
+                            'phone': phone,
+                            'email': email,
+                            'is_primary': (primary_contact_var.get() == idx)
+                        })
+
+                    # Сохраняем контакты
+                    for contact_data in contacts_payload:
+                        if contact_data['id']:
+                            # Обновляем существующий контакт
+                            self.contact_persons_mgr.update(
+                                contact_data['id'],
+                                contact_data['full_name'],
+                                contact_data['position'],
+                                contact_data['phone'],
+                                contact_data['is_primary']
+                            )
+                            # Обновляем email
+                            if self.contact_emails_mgr:
+                                try:
+                                    existing_emails = self.contact_emails_mgr.get_by_contact(contact_data['id'])
+                                    if existing_emails and contact_data['email']:
+                                        # Обновляем существующий email
+                                        email_id = dict(existing_emails[0])['id'] if hasattr(existing_emails[0], 'keys') else existing_emails[0]['id']
+                                        self.contact_emails_mgr.update(email_id, contact_data['email'], True)
+                                    elif contact_data['email']:
+                                        # Создаем новый email
+                                        self.contact_emails_mgr.add(contact_data['id'], contact_data['email'], True)
+                                except Exception as e:
+                                    print(f"Ошибка сохранения email: {e}")
+                        else:
+                            # Создаем новый контакт
+                            new_contact_id = self.contact_persons_mgr.add(
+                                client_id=client_id,
+                                full_name=contact_data['full_name'],
+                                position=contact_data['position'],
+                                phone=contact_data['phone'],
+                                is_primary=contact_data['is_primary']
+                            )
+                            # Добавляем email если есть
+                            if contact_data['email'] and self.contact_emails_mgr:
+                                try:
+                                    self.contact_emails_mgr.add(new_contact_id, contact_data['email'], True)
+                                except Exception as e:
+                                    print(f"Ошибка сохранения email: {e}")
+
+                    # Удаляем контакты помеченные как удаленные
+                    for w in contact_widgets:
+                        if w.get('deleted', False) and w.get('id'):
+                            try:
+                                self.contact_persons_mgr.delete(w['id'])
+                            except Exception as e:
+                                print(f"Ошибка удаления контакта: {e}")
+
+                    from tkinter import messagebox
+                    dialog.destroy()
+                    self._refresh_data()
+                    self._refresh_contacts_tab()
+
+                except Exception as e:
+                    from tkinter import messagebox
+                    messagebox.showerror("Ошибка", str(e))
+
+            self._create_dialog_buttons(buttons_frame, save)
+
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
+
+    def _delete_client_from_card(self, client, card_window):
+        """Удалить клиента из карточки"""
+        confirm = show_confirmation(
+            card_window,
+            "Удаление клиента",
+            f"Вы уверены, что хотите удалить клиента '{client.get('company', '')}'?\n\nЭто действие нельзя отменить!"
+        )
+
+        if confirm:
+            try:
+                self.clients_mgr.delete(client.get('id'))
+                messagebox.showinfo("Успех", "Клиент удален!")
+                card_window.destroy()
+                self._refresh_data()
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось удалить клиента: {e}")

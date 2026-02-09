@@ -4,24 +4,25 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="обновлена логика проекта, сделан шаблон разделов">
+    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="переделан раздел задачи">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/database_backup_20260202_230026.db" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/database_backup_20260202_230641.db" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/experts_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/experts_manager.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/utils/constants.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/constants.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/calendar_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/calendar_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views/experts_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/experts_view.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/views/table_view_template.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/table_view_template.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/tasks_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/tasks_view.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="CopilotPersistence">
+    <persistenceIdMap>
+      <entry key="_D:/diplom_srm" value="38oQJ2pr5s7ZP7k4isOGMGbRGC9" />
+    </persistenceIdMap>
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -87,7 +88,8 @@
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.github.copilot.settings.customization.CustomizationConfigurable&quot;
   }
 }</component>
   <component name="RunManager">
@@ -182,7 +184,15 @@
       <option name="project" value="LOCAL" />
       <updated>1770063078448</updated>
     </task>
-    <option name="localTasksCounter" value="7" />
+    <task id="LOCAL-00007" summary="переделан раздел задачи">
+      <option name="closed" value="true" />
+      <created>1770473549905</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1770473549905</updated>
+    </task>
+    <option name="localTasksCounter" value="8" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -206,6 +216,15 @@
     <MESSAGE value="srm_fmm&#10;сделано окно клиентов и задач" />
     <MESSAGE value="сделан однотипный дизайн для разделов задачи и клиенты" />
     <MESSAGE value="обновлена логика проекта, сделан шаблон разделов" />
-    <option name="LAST_COMMIT_MESSAGE" value="обновлена логика проекта, сделан шаблон разделов" />
+    <MESSAGE value="переделан раздел задачи" />
+    <option name="LAST_COMMIT_MESSAGE" value="переделан раздел задачи" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
   </component>
 </project>
