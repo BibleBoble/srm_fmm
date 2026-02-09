@@ -4,15 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="переделан раздел задачи">
+    <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="переделан раздел информации о клиенте, но не доработан">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/utils/constants.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/constants.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/experts_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/experts_view.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/views/table_view_template.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/table_view_template.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -192,7 +185,15 @@
       <option name="project" value="LOCAL" />
       <updated>1770473549905</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="переделан раздел информации о клиенте, но не доработан">
+      <option name="closed" value="true" />
+      <created>1770672712019</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1770672712019</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
@@ -217,7 +218,8 @@
     <MESSAGE value="сделан однотипный дизайн для разделов задачи и клиенты" />
     <MESSAGE value="обновлена логика проекта, сделан шаблон разделов" />
     <MESSAGE value="переделан раздел задачи" />
-    <option name="LAST_COMMIT_MESSAGE" value="переделан раздел задачи" />
+    <MESSAGE value="переделан раздел информации о клиенте, но не доработан" />
+    <option name="LAST_COMMIT_MESSAGE" value="переделан раздел информации о клиенте, но не доработан" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
