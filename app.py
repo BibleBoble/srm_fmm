@@ -2,18 +2,14 @@
 Главный класс приложения SRM FMM
 """
 import tkinter as tk
-from datetime import date
 
 # Импортируем менеджеры
 from managers.clients_manager import ClientsManager
-from managers.contracts_manager import ContractsManager
 from managers.tasks_manager import TasksManager
 from managers.experts_manager import ExpertsManager
 
 # Импортируем представления
-from views.calendar_view import CalendarView
 from views.clients_view import ClientsView
-from views.contracts_view import ContractsView
 from views.experts_view import ExpertsView
 from views.tasks_view import TasksView
 from views.reports_view import ReportsView
@@ -31,28 +27,21 @@ class App:
         """
         self.root = root
 
-        # Данные приложения
-        self.selected_date = None  # выбранная дата в календаре
-
         # Создаём менеджеры БД
         self.clients_mgr = ClientsManager()
-        self.contracts_mgr = ContractsManager()
         self.tasks_mgr = TasksManager()
         self.experts_mgr = ExpertsManager()  # <-- Уже есть здесь
-        self.experts_view = None  # <-- Уже есть здесь
 
         from managers.contact_persons_manager import ContactPersonsManager
-        from managers.contact_emails_manager import ContactEmailsManager  # Изменено
+        from managers.contact_emails_manager import ContactEmailsManager
         from managers.interactions_manager import InteractionsManager
 
         self.contact_persons_mgr = ContactPersonsManager()
-        self.contact_emails_mgr = ContactEmailsManager()  # Изменено
+        self.contact_emails_mgr = ContactEmailsManager()
         self.interactions_mgr = InteractionsManager()
 
         # Представления (создадим после создания content_frame)
-        self.calendar_view = None
         self.clients_view = None
-        self.contracts_view = None
         self.tasks_view = None
         self.reports_view = None
 
@@ -64,8 +53,8 @@ class App:
         self._create_content_area()
         self._create_views()
 
-        # Показываем главную страницу
-        self.show_main()
+        # Открываем основной рабочий раздел при запуске.
+        self.show_tasks()
 
     def _setup_window(self):
         """Настройка главного окна в классическом стиле"""
@@ -88,11 +77,9 @@ class App:
         # Список кнопок меню
         self.menu_buttons = {}
         buttons_data = [
-            ("Главная", self.show_main),
-            ("Клиенты", self.show_clients),
-            ("Договора", self.show_contracts),
-            ("Эксперты", self.show_experts),
             ("Задачи", self.show_tasks),
+            ("Клиенты", self.show_clients),
+            ("Эксперты", self.show_experts),
             ("Отчеты", self.show_reports)
         ]
 
@@ -161,42 +148,18 @@ class App:
 
     def _create_views(self):
         """Создаёт все представления (но не отображает их)"""
-        self.calendar_view = CalendarView(
-            self.content_frame,
-            on_date_click_callback=self.on_date_click
-        )
-
-        # ПЕРЕДАЕМ ВСЕ МЕНЕДЖЕРЫ, включая tasks_mgr и contact_emails_mgr
         self.clients_view = ClientsView(
             self.content_frame,
             self.clients_mgr,
             self.contact_persons_mgr,
-            self.contact_emails_mgr,  # Изменено
+            self.contact_emails_mgr,
             self.interactions_mgr,
             self.tasks_mgr
         )
 
-        self.contracts_view = ContractsView(self.content_frame)
         self.experts_view = ExpertsView(self.content_frame, self.experts_mgr)
         self.tasks_view = TasksView(self.content_frame, self.tasks_mgr, self.clients_mgr)
         self.reports_view = ReportsView(self.content_frame)
-
-    # --- ОБРАБОТЧИКИ СОБЫТИЙ ---
-
-    def on_date_click(self, day, month, year):
-        """
-        Вызывается при клике на дату в календаре
-
-        Args:
-            day, month, year: int - компоненты даты
-        """
-        self.selected_date = date(year, month, day)
-        print(f"App: выбрана дата {self.selected_date.strftime('%d.%m.%Y (%A)')}")
-
-        # Здесь можно добавить дополнительную логику:
-        # - показать окно создания задачи
-        # - загрузить события на эту дату
-        # - и т.д.
 
     def _on_exit(self):
         """Обработчик выхода из приложения"""
@@ -211,23 +174,11 @@ class App:
 
     # --- МЕТОДЫ НАВИГАЦИИ ---
 
-    def show_main(self):
-        """Показывает главную страницу (календарь)"""
-        print("-> Переход на: Главная")
-        self._set_active_menu("Главная")
-        self.calendar_view.show()
-
     def show_clients(self):
         """Показывает раздел 'Клиенты'"""
         print("-> Переход на: Клиенты")
         self._set_active_menu("Клиенты")
         self.clients_view.show()
-
-    def show_contracts(self):
-        """Показывает раздел 'Договора'"""
-        print("-> Переход на: Договора")
-        self._set_active_menu("Договора")
-        self.contracts_view.show()
 
     def show_experts(self):
         """Показывает раздел 'Эксперты'"""
