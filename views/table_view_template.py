@@ -6,8 +6,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from views.base_view import BaseView
-from utils.constants import TableView, Sizes, Limits, UISettings
+from utils.constants import Colors, TableView, Sizes, Limits, UISettings
 from utils.helpers import show_message, show_confirmation
+from utils.ui_helpers import center_toplevel
 
 
 class TableViewTemplate(BaseView):
@@ -102,7 +103,11 @@ class TableViewTemplate(BaseView):
             relief="solid",
             borderwidth=1,
             bg=TableView.TABLE_BG,
-            fg=TableView.LABEL_FG
+            fg=TableView.LABEL_FG,
+            insertbackground=TableView.LABEL_FG,
+            highlightthickness=1,
+            highlightbackground=TableView.ROW_HOVER,
+            highlightcolor=TableView.BUTTON_BG
         )
         search_entry.pack(side=tk.LEFT, padx=5, ipady=6)
 
@@ -146,7 +151,9 @@ class TableViewTemplate(BaseView):
             relief="flat",
             padx=20,
             pady=10,
-            cursor="hand2"
+            cursor="hand2",
+            activebackground=TableView.BUTTON_ACTIVE_BG,
+            activeforeground=TableView.BUTTON_FG
         )
         self.add_button.pack(side=tk.RIGHT, padx=Sizes.TOP_PANEL_PADDING_X, pady=Sizes.TOP_PANEL_PADDING_Y)
 
@@ -186,18 +193,30 @@ class TableViewTemplate(BaseView):
             rowheight=Sizes.TABLE_ROW_HEIGHT,
             fieldbackground=TableView.TABLE_BG,
             borderwidth=0,
+            relief="flat",
             font=TableView.TABLE_FONT
+        )
+        style.map(
+            "Treeview",
+            background=[("selected", TableView.ROW_HOVER)],
+            foreground=[("selected", TableView.LABEL_FG)]
         )
         style.configure(
             "Treeview.Heading",
             background=TableView.HEADING_BG,
             foreground=TableView.HEADING_FG,
             font=TableView.HEADING_FONT,
-            padding=(10, 8),
-            borderwidth=1,
+            padding=(12, 10),
+            borderwidth=0,
             relief="flat"
         )
         style.map("Treeview.Heading", background=[("active", TableView.HEADING_ACTIVE)])
+        style.configure(
+            "TCombobox",
+            padding=(8, 5),
+            fieldbackground=TableView.TABLE_BG,
+            foreground=TableView.LABEL_FG
+        )
 
         self.tree = ttk.Treeview(
             self.table_container,
@@ -218,9 +237,14 @@ class TableViewTemplate(BaseView):
         self.tree.tag_configure('selected', background=TableView.ROW_HOVER)
 
         # Добавляем тег для основного (primary) — светло-зелёный фон
-        self.tree.tag_configure('primary', background="#d4edda")
+        self.tree.tag_configure(
+            'primary',
+            background=Colors.COMPLETED_BG,
+            foreground=Colors.COMPLETED_FG
+        )
 
         scrollbar = ttk.Scrollbar(self.table_container, orient="vertical", command=self.tree.yview)
+        self.scrollbar = scrollbar
         self.tree.configure(yscrollcommand=scrollbar.set)
 
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1)
@@ -249,7 +273,8 @@ class TableViewTemplate(BaseView):
             command=lambda: self._go_to_page(1),
             state="normal" if self.current_page > 1 else "disabled",
             bg=TableView.PAGINATION_BUTTON_BG,
-            fg=TableView.BUTTON_FG,
+            fg=Colors.WHITE,
+            disabledforeground=Colors.WHITE,
             font=TableView.PAGINATION_FONT,
             width=10,
             relief="flat",
@@ -262,7 +287,8 @@ class TableViewTemplate(BaseView):
             command=lambda: self._go_to_page(self.current_page - 1),
             state="normal" if self.current_page > 1 else "disabled",
             bg=TableView.PAGINATION_BUTTON_BG,
-            fg=TableView.BUTTON_FG,
+            fg=Colors.WHITE,
+            disabledforeground=Colors.WHITE,
             font=TableView.PAGINATION_FONT,
             width=10,
             relief="flat",
@@ -283,7 +309,8 @@ class TableViewTemplate(BaseView):
             command=lambda: self._go_to_page(self.current_page + 1),
             state="normal" if self.current_page < total_pages else "disabled",
             bg=TableView.PAGINATION_BUTTON_BG,
-            fg=TableView.BUTTON_FG,
+            fg=Colors.WHITE,
+            disabledforeground=Colors.WHITE,
             font=TableView.PAGINATION_FONT,
             width=10,
             relief="flat",
@@ -296,7 +323,8 @@ class TableViewTemplate(BaseView):
             command=lambda: self._go_to_page(total_pages),
             state="normal" if self.current_page < total_pages else "disabled",
             bg=TableView.PAGINATION_BUTTON_BG,
-            fg=TableView.BUTTON_FG,
+            fg=Colors.WHITE,
+            disabledforeground=Colors.WHITE,
             font=TableView.PAGINATION_FONT,
             width=10,
             relief="flat",
@@ -484,11 +512,12 @@ class TableViewTemplate(BaseView):
         dialog = tk.Toplevel(self.parent_frame)
         dialog.title(title)
         dialog.geometry(geometry)
-        dialog.configure(bg='white')
+        dialog.configure(bg=Colors.LIGHT)
         dialog.resizable(False, False)
+        center_toplevel(dialog)
         
         # Заголовок
-        header = tk.Frame(dialog, bg='#333333', height=60)
+        header = tk.Frame(dialog, bg=Colors.DARK, height=60)
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
         
@@ -496,26 +525,26 @@ class TableViewTemplate(BaseView):
             header,
             text=title,
             font=("Arial", 18, "bold"),
-            fg='white',
-            bg='#333333'
+            fg=Colors.WHITE,
+            bg=Colors.DARK
         ).pack(pady=15)
         
         # Кнопки внизу
-        buttons_container = tk.Frame(dialog, bg='#f0f0f0', height=80)
+        buttons_container = tk.Frame(dialog, bg=Colors.SURFACE, height=80)
         buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
         buttons_container.pack_propagate(False)
         
-        buttons_frame = tk.Frame(buttons_container, bg='#f0f0f0')
+        buttons_frame = tk.Frame(buttons_container, bg=Colors.SURFACE)
         buttons_frame.pack(pady=15)
         
         # Canvas для прокрутки контента
-        canvas_container = tk.Frame(dialog, bg='white')
+        canvas_container = tk.Frame(dialog, bg=Colors.LIGHT)
         canvas_container.pack(fill=tk.BOTH, expand=True)
         
-        canvas = tk.Canvas(canvas_container, bg='white', highlightthickness=0)
+        canvas = tk.Canvas(canvas_container, bg=Colors.SURFACE, highlightthickness=0)
         scrollbar = tk.Scrollbar(canvas_container, orient="vertical", command=canvas.yview)
         
-        scrollable_content = tk.Frame(canvas, bg='white')
+        scrollable_content = tk.Frame(canvas, bg=Colors.SURFACE)
         
         def on_frame_configure(event):
             canvas.configure(scrollregion=canvas.bbox("all"))
@@ -655,12 +684,15 @@ class TableViewTemplate(BaseView):
             parent,
             text="💾 Сохранить",
             command=save_callback,
-            bg="#28a745",
-            fg="white",
+            bg=Colors.PRIMARY,
+            fg=Colors.WHITE,
             font=("Arial", 12, "bold"),
             cursor="hand2",
             padx=20,
-            pady=10
+            pady=10,
+            relief="flat",
+            activebackground=Colors.PRIMARY_HOVER,
+            activeforeground=Colors.WHITE
         ).pack(side=tk.LEFT, padx=10)
         
         # Кнопка отмены
@@ -668,10 +700,13 @@ class TableViewTemplate(BaseView):
             parent,
             text="✖ Отмена",
             command=cancel_callback,
-            bg="#6c757d",
-            fg="white",
+            bg=Colors.LIGHT,
+            fg=Colors.TEXT,
             font=("Arial", 12, "bold"),
             cursor="hand2",
             padx=20,
-            pady=10
+            pady=10,
+            relief="flat",
+            activebackground=Colors.BORDER,
+            activeforeground=Colors.TEXT
         ).pack(side=tk.LEFT, padx=10)

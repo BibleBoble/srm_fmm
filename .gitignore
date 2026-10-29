@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtualenv
+venv/
+.env/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+test_database.db
+test_backup.db
+
+# Logs and backups
+logs/
+backups/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+

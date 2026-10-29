@@ -247,3 +247,30 @@ class ContactPersonsManager:
         query = "SELECT COUNT(*) as count FROM contact_persons WHERE client_id = ?"
         result = self.db.fetch_one(query, (client_id,))
         return result['count'] if result else 0
+
+    def get_sorted_by_name(self, reverse: bool = False):
+        """Получить контакты отсортированные по ФИО"""
+        query = "SELECT * FROM contact_persons ORDER BY full_name"
+        if reverse:
+            query += " DESC"
+        rows = self.db.fetch_all(query, ())
+        return [dict(row) for row in rows]
+
+    def get_sorted_by_position(self, reverse: bool = False):
+        """Получить контакты отсортированные по должности"""
+        query = "SELECT * FROM contact_persons ORDER BY position"
+        if reverse:
+            query += " DESC"
+        rows = self.db.fetch_all(query, ())
+        return [dict(row) for row in rows]
+
+    def get_filtered_by_client(self, client_id: int, is_primary: bool = None):
+        """Получить контакты клиента, опционально основные"""
+        query = "SELECT * FROM contact_persons WHERE client_id = ?"
+        params = (client_id,)
+        if is_primary is not None:
+            query += " AND is_primary = ?"
+            params = (client_id, int(is_primary))
+        query += " ORDER BY is_primary DESC, full_name"
+        rows = self.db.fetch_all(query, params)
+        return [dict(row) for row in rows]

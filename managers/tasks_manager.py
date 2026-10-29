@@ -4,7 +4,7 @@
 from managers.database import Database
 from datetime import date, datetime
 from models.task import Task
-
+from utils.formatters import StatusFormatter
 
 class TasksManager:
     """Класс для управления задачами"""
@@ -113,17 +113,28 @@ class TasksManager:
 
     def search(self, query_text):
         """Поиск задач"""
-        search_term = f"%{query_text}%"
-        query = """
-            SELECT 
-                t.*, 
+        # Поиск по имени клиента только (c.company), нечувствительный к регистру.
+        tokens = [tok.strip() for tok in str(query_text).split() if tok.strip()]
+        if not tokens:
+            return []
+
+        where_clauses = []
+        params = []
+        for tok in tokens:
+            where_clauses.append("LOWER(COALESCE(c.company, '')) LIKE ?")
+            params.append(f"%{tok.lower()}%")
+
+        where_sql = " AND ".join(where_clauses)
+        query = f"""
+            SELECT
+                t.*,
                 c.company as client_name
             FROM tasks t
             LEFT JOIN clients c ON t.client_id = c.id
-            WHERE t.title LIKE ? OR t.description LIKE ? OR c.company LIKE ?
+            WHERE {where_sql}
             ORDER BY t.completed ASC, t.due_date ASC
         """
-        rows = self.db.fetch_all(query, (search_term, search_term, search_term))
+        rows = self.db.fetch_all(query, params)
 
         from models.task import Task
         tasks = []
@@ -238,3 +249,37 @@ class TasksManager:
         today = date.today()
         return [task for task in tasks
                 if task.due_date and task.due_date < today and not task.completed]
+
+    def get_sorted_by_priority(self, reverse: bool = False):
+        """Получить задачи отсортированные по приоритету"""
+        tasks = self.get_all()
+        priority_order = {'Высокий': 0, 'Средний': 1, 'Низкий': 2}
+        tasks.sort(key=lambda t: priority_order.get(t.priority, 3), reverse=reverse)
+        return tasks
+
+    def get_sorted_by_due_date(self, reverse: bool = False):
+        """Получить задачи отсортированные по сроку выполнения"""
+        tasks = self.get_all()
+        tasks.sort(key=lambda t: (t.due_date is None, t.due_date), reverse=reverse)
+        return tasks
+
+    def get_filtered_by_status(self, status: str):
+        """Получить задачи по статусу ('Активная', 'Выполнена')"""
+        normalized_status = StatusFormatter.normalize(status)
+        tasks = self.get_all()
+        if normalized_status == 'Активная':
+            return [task for task in tasks if not task.completed]
+        elif normalized_status == 'Выполнена':
+            return [task for task in tasks if task.completed]
+        return tasks
+
+    def get_filtered_by_client(self, client_id: int, status: str = None):
+        """Получить задачи клиента, опционально по статусу"""
+        tasks = self.get_by_client(client_id)
+        if status:
+            normalized_status = StatusFormatter.normalize(status)
+            if normalized_status == 'Активная':
+                return [task for task in tasks if not task.completed]
+            elif normalized_status == 'Выполнена':
+                return [task for task in tasks if task.completed]
+        return tasks

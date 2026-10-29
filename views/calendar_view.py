@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox
 import calendar
 from datetime import date
+from utils.ui_helpers import center_toplevel
 import locale
 from views.base_view import BaseView
 
@@ -190,19 +191,12 @@ class CalendarDialog(tk.Toplevel):
         # Результат выбора
         self.selected_date = None
         
-        # Центрируем относительно родителя
-        try:
-            x = parent.winfo_rootx() + 50
-            y = parent.winfo_rooty() + 50
-            self.geometry(f"+{x}+{y}")
-        except:
-            pass
-
         self.current_date = date.today()
         self.result = None
 
         self._setup_ui()
         self._update_calendar()
+        center_toplevel(self)
 
     def _setup_ui(self):
         """Создание интерфейса"""

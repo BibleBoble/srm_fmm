@@ -58,13 +58,18 @@ class Task:
         # Преобразуем даты
         due_date = data.get('due_date')
         if isinstance(due_date, str):
-            try:
-                due_date = datetime.strptime(due_date, '%Y-%m-%d').date()
-            except:
+            due_date = None
+            for date_format in (
+                '%Y-%m-%d',
+                '%d.%m.%Y',
+                '%Y-%m-%d %H:%M:%S',
+                '%d.%m.%Y %H:%M:%S'
+            ):
                 try:
-                    due_date = datetime.strptime(due_date, '%Y-%m-%d %H:%M:%S').date()
-                except:
-                    due_date = None
+                    due_date = datetime.strptime(data.get('due_date'), date_format).date()
+                    break
+                except ValueError:
+                    continue
 
         created_at = data.get('created_at')
         if isinstance(created_at, str):
@@ -95,3 +100,26 @@ class Task:
         if not self.due_date or self.completed:
             return False
         return self.due_date < date.today()
+
+    def validate_title(self, title: str) -> tuple:
+        """
+        Валидация названия задачи
+
+        Returns:
+            (is_valid: bool, error_message: str)
+        """
+        title = title.strip() if isinstance(title, str) else ""
+
+        if not title:
+            return False, "Название задачи обязательно"
+        if len(title) < 3:
+            return False, "Название должно содержать минимум 3 символа"
+        if len(title) > 255:
+            return False, "Название слишком длинное (макс 255 символов)"
+
+        return True, ""
+
+    def is_valid_for_save(self) -> bool:
+        """Полная валидация перед сохранением"""
+        is_ok, _ = self.validate_title(self.title)
+        return is_ok

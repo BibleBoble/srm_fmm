@@ -35,25 +35,49 @@ class Colors:
     """Цветовая схема интерфейса"""
 
     # Основные цвета
-    PRIMARY = "#41a5be"  # Бирюзовый (кнопки, акценты)
-    DARK = "#333333"  # Темный (заголовки, меню)
-    LIGHT = "#f0f0f0"  # Светлый фон
-    WHITE = "#ffffff"  # Белый
+    PRIMARY = "#0f766e"
+    PRIMARY_HOVER = "#115e59"
+    DARK = "#172b4d"
+    LIGHT = "#f3f6fa"
+    WHITE = "#ffffff"
+    TEXT = "#243247"
+    MUTED = "#64748b"
+    BORDER = "#dbe3ec"
+    SURFACE = "#ffffff"
+    NAV_BG = "#172b4d"
+    NAV_BUTTON_BG = "#243b5e"
+    NAV_ACTIVE_BG = "#ffffff"
+    NAV_ACTIVE_FG = "#172b4d"
 
     # Цвета состояний
-    SUCCESS = "#4CAF50"  # Зеленый (успех)
-    DANGER = "#d9534f"  # Красный (опасность, удаление)
-    WARNING = "#FF9800"  # Оранжевый (предупреждение)
-    INFO = "#2196F3"  # Синий (информация)
+    SUCCESS = "#15803d"
+    DANGER = "#b42318"
+    DANGER_HOVER = "#912018"
+    WARNING = "#c2410c"
+    INFO = "#2563eb"
 
     # Дополнительные
-    GRAY = "#6c757d"  # Серый (отмена, неактивные элементы)
-    GRAY_LIGHT = "#f8f9fa"  # Светло-серый (фон карточек)
-    GRAY_BORDER = "#ccc"  # Серый для границ
+    GRAY = "#64748b"
+    GRAY_LIGHT = "#f8fafc"
+    GRAY_BORDER = "#dbe3ec"
 
     # Специальные
-    OVERDUE = "#fee2e2"  # Фон для просроченных задач
-    HOVER = "#e8f4f8"  # Фон при наведении
+    OVERDUE = "#fee2e2"
+    HOVER = "#e6f4f1"
+    COMPLETED_BG = "#ecfdf3"
+    COMPLETED_FG = "#166534"
+    OVERDUE_FG = "#991b1b"
+    TASK_COMPLETED_BG = "#eaf6ed"
+    TASK_OVERDUE_BG = "#ffdfb8"
+    TASK_CURRENT_BG = "#eaf4fb"
+    TASK_ROW_BORDER = "#b8c5d3"
+    TASK_TEXT = "#000000"
+    PRIORITY_HIGH_BG = "#fff7ed"
+    PRIORITY_HIGH_FG = "#9a3412"
+    PRIORITY_MEDIUM_BG = "#fffbeb"
+    PRIORITY_MEDIUM_FG = "#92400e"
+    PRIORITY_LOW_BG = "#eff6ff"
+    PRIORITY_LOW_FG = "#1d4ed8"
 
 
 # ============================================
@@ -100,7 +124,7 @@ class Sizes:
 
     # Элементы
     HEADER_HEIGHT = 60
-    MENU_HEIGHT = 50
+    MENU_HEIGHT = 56
     BUTTON_PANEL_HEIGHT = 80
     ENTRY_WIDTH = 50
     TEXT_HEIGHT = 4
@@ -113,7 +137,7 @@ class Sizes:
     PADDING_XLARGE = 30
 
     # Таблицы
-    TABLE_ROW_HEIGHT = 40
+    TABLE_ROW_HEIGHT = 42
     TABLE_MAX_ROWS = 25
     TABLE_VISIBLE_ROWS = 25  # Высота Treeview в строках
 
@@ -138,21 +162,22 @@ class TableView:
     """Константы для шаблона табличных представлений (клиенты, эксперты и т.д.)"""
 
     # Цвета
-    TOP_PANEL_BG = "#f0f0f0"
-    TABLE_BG = "#ffffff"
-    ROW_EVEN = "#f8f9fa"
-    ROW_ODD = "#ffffff"
-    ROW_HOVER = "#e8f4f8"
-    HEADING_BG = "#333333"
-    HEADING_FG = "#ffffff"
-    HEADING_ACTIVE = "#444444"
-    BUTTON_BG = "#41a5be"
-    BUTTON_FG = "black"
-    LABEL_FG = "#333"
-    HINT_FG = "#666"
-    PAGINATION_BG = "#f0f0f0"
-    PAGINATION_BUTTON_BG = "#41a5be"
-    PAGINATION_BUTTON_DISABLED = "#cccccc"
+    TOP_PANEL_BG = Colors.LIGHT
+    TABLE_BG = Colors.SURFACE
+    ROW_EVEN = "#f8fafc"
+    ROW_ODD = Colors.SURFACE
+    ROW_HOVER = Colors.HOVER
+    HEADING_BG = Colors.DARK
+    HEADING_FG = Colors.WHITE
+    HEADING_ACTIVE = "#243b5e"
+    BUTTON_BG = Colors.PRIMARY
+    BUTTON_ACTIVE_BG = Colors.PRIMARY_HOVER
+    BUTTON_FG = Colors.WHITE
+    LABEL_FG = Colors.TEXT
+    HINT_FG = Colors.MUTED
+    PAGINATION_BG = Colors.LIGHT
+    PAGINATION_BUTTON_BG = Colors.PRIMARY
+    PAGINATION_BUTTON_DISABLED = Colors.BORDER
 
     # Шрифты
     INFO_FONT = (Fonts.FAMILY, 11, "bold")
@@ -396,6 +421,46 @@ def get_priority_color(priority: str) -> str:
 
 
 # ============================================
+# ИКОНКИ UI
+# ============================================
+
+class Icons:
+    """Иконки для UI элементов"""
+
+    PRIORITY = {
+        'Высокий': '🔴',
+        'Средний': '🟡',
+        'Низкий': '🟢'
+    }
+
+    STATUS = {
+        'Активная': '⏳',
+        'Выполнена': '✅',
+        'Новая': '📝',
+        'В работе': '🔄',
+        'Отложена': '⏸',
+        'Отменена': '❌'
+    }
+
+
+# ============================================
+# ЦВЕТА СТАТУСОВ
+# ============================================
+
+class StatusColors:
+    """Цвета для разных статусов"""
+
+    COLORS = {
+        'Активная': '#17a2b8',
+        'Выполнена': '#28a745',
+        'Новая': '#007bff',
+        'В работе': '#17a2b8',
+        'Отложена': '#6c757d',
+        'Отменена': '#dc3545'
+    }
+
+
+# ============================================
 # ЭКСПОРТ
 # ============================================
 
@@ -413,6 +478,8 @@ __all__ = [
     'ContractStatuses',
     'Messages',
     'Validation',
+    'Icons',
+    'StatusColors',
     'get_interaction_icon',
     'get_priority_icon',
     'get_priority_color'

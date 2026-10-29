@@ -104,7 +104,7 @@ class ClientsView(BaseView):
         self.tree.tag_configure('oddrow', background='white')
         self.tree.tag_configure('selected', background='#e8f4f8')  # Цвет при наведении
 
-        # Скроллбар с кастомизацией
+        # Настраиваем полосу прокрутки
         scrollbar = ttk.Scrollbar(
             self.table_container,
             orient="vertical",
@@ -285,7 +285,7 @@ class ClientsView(BaseView):
             self.tree.insert("", tk.END, values=values, tags=(tag,))
 
     def _on_search_change(self, *args):
-        """Обработчик изменения поискового запроса с дебаунсингом"""
+        """Обработчик изменения поискового запроса с задержкой"""
         # Отменяем предыдущую отложенную задачу, если она есть
         if self.search_job:
             self.parent_frame.after_cancel(self.search_job)
@@ -2521,6 +2521,5 @@ class ClientsView(BaseView):
                     show_message(parent_window, "Ошибка", "Не удалось обновить статус задачи", "error")
             except Exception as e:
                 show_message(parent_window, "Ошибка", f"Не удалось завершить задачу: {e}", "error")
-
 
 

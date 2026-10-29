@@ -6,198 +6,14 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from views.table_view_template import TableViewTemplate
 from utils.helpers import show_message
-from utils.constants import TableView, TaskPriorities, get_priority_icon, Sizes
+from utils.constants import Colors, TableView, TaskPriorities, get_priority_icon, Sizes
 from datetime import date, datetime
 from models.task import Task
 from views.calendar_view import CalendarDialog
 
-
-class SearchableCombobox:
-    """Комбобокс с поиском и автодополнением"""
-    
-    def __init__(self, parent, values=None, font=("Arial", 11), **kwargs):
-        self.parent = parent
-        self.values = values or []
-        self.filtered_values = self.values.copy()
-        self.listbox_visible = False
-        
-        # Создаем frame для entry
-        self.frame = tk.Frame(parent, bg='white')
-        
-        # Entry для ввода с поиском
-        self.var = tk.StringVar()
-        self.entry = tk.Entry(
-            self.frame,
-            textvariable=self.var,
-            font=font,
-            relief="solid",
-            borderwidth=1,
-            **kwargs
-        )
-        self.entry.pack(fill=tk.X, expand=True)
-        
-        # Listbox для отображения результатов (создается в родительском окне)
-        self.listbox_frame = tk.Toplevel(parent)
-        self.listbox_frame.withdraw()  # Изначально скрыт
-        self.listbox_frame.overrideredirect(True)  # Убираем рамку окна
-        
-        self.listbox = tk.Listbox(
-            self.listbox_frame,
-            font=font,
-            bg='white',
-            selectbackground='#41a5be',
-            selectforeground='white',
-            height=6,
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=0
-        )
-        
-        # Scrollbar для списка
-        scrollbar = tk.Scrollbar(self.listbox_frame, orient="vertical")
-        self.listbox.config(yscrollcommand=scrollbar.set)
-        scrollbar.config(command=self.listbox.yview)
-        
-        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Привязываем события
-        self.var.trace('w', self._on_type)
-        self.entry.bind('<FocusIn>', self._on_focus_in)
-        self.entry.bind('<FocusOut>', self._on_focus_out)
-        self.entry.bind('<KeyRelease>', self._on_key_release)
-        self.entry.bind('<Return>', self._on_select)
-        self.entry.bind('<Escape>', self._hide_list)
-        self.entry.bind('<Down>', self._on_down)
-        self.entry.bind('<Up>', self._on_up)
-        self.listbox.bind('<Button-1>', self._on_listbox_click)
-        self.listbox.bind('<Return>', self._on_select)
-        self.listbox.bind('<Escape>', self._hide_list)
-        
-        # Глобальная привязка для скрытия при клике вне
-        self.listbox_frame.bind('<FocusOut>', self._on_focus_out)
-        
-    def _on_type(self, *args):
-        """Фильтрация при вводе текста"""
-        text = self.var.get().lower()
-        
-        if not text:
-            self.filtered_values = self.values.copy()
-        else:
-            self.filtered_values = [
-                val for val in self.values 
-                if text in val.lower()
-            ]
-        
-        self._update_listbox()
-        if self.filtered_values:
-            self._show_list()
-        else:
-            self._hide_list()
-        
-    def _update_listbox(self):
-        """Обновление содержимого listbox"""
-        self.listbox.delete(0, tk.END)
-        for value in self.filtered_values:
-            self.listbox.insert(tk.END, value)
-            
-    def _show_list(self):
-        """Показать список"""
-        if not self.filtered_values:
-            return
-            
-        # Позиционируем список под entry
-        try:
-            x = self.entry.winfo_rootx()
-            y = self.entry.winfo_rooty() + self.entry.winfo_height()
-            width = self.entry.winfo_width()
-            
-            self.listbox_frame.geometry(f"{width}x{min(150, len(self.filtered_values) * 25)}+{x}+{y}")
-            self.listbox_frame.deiconify()
-            self.listbox_frame.lift()
-            self.listbox_visible = True
-        except:
-            pass
-            
-    def _hide_list(self, event=None):
-        """Скрыть список"""
-        try:
-            self.listbox_frame.withdraw()
-            self.listbox_visible = False
-        except:
-            pass
-        
-    def _on_focus_in(self, event=None):
-        """При получении фокуса"""
-        if self.var.get():
-            self._show_list()
-            
-    def _on_focus_out(self, event=None):
-        """При потере фокуса"""
-        # Задержка чтобы успеть кликнуть на список
-        self.parent.after(150, self._hide_list)
-        
-    def _on_key_release(self, event):
-        """При отпускании клавиши"""
-        if event.keysym in ('Up', 'Down', 'Return', 'Escape'):
-            return
-        self._on_type()
-        
-    def _on_down(self, event):
-        """Стрелка вниз"""
-        if not self.listbox_visible:
-            self._show_list()
-        else:
-            current = self.listbox.curselection()
-            if current:
-                next_index = (current[0] + 1) % len(self.filtered_values)
-            else:
-                next_index = 0
-            self.listbox.selection_clear(0, tk.END)
-            self.listbox.selection_set(next_index)
-            self.listbox.see(next_index)
-        return "break"
-        
-    def _on_up(self, event):
-        """Стрелка вверх"""
-        if self.listbox_visible:
-            current = self.listbox.curselection()
-            if current:
-                prev_index = (current[0] - 1) % len(self.filtered_values)
-            else:
-                prev_index = len(self.filtered_values) - 1
-            self.listbox.selection_clear(0, tk.END)
-            self.listbox.selection_set(prev_index)
-            self.listbox.see(prev_index)
-        return "break"
-        
-    def _on_select(self, event=None):
-        """Выбор элемента"""
-        selection = self.listbox.curselection()
-        if selection:
-            selected_value = self.listbox.get(selection[0])
-            self.var.set(selected_value)
-        self._hide_list()
-        
-    def _on_listbox_click(self, event=None):
-        """Клик по элементу списка"""
-        self._on_select()
-        
-    def get(self):
-        """Получить текущее значение"""
-        return self.var.get()
-        
-    def set(self, value):
-        """Установить значение"""
-        self.var.set(value)
-        
-    def pack(self, **kwargs):
-        """Упаковка основного frame"""
-        self.frame.pack(**kwargs)
-        
-    def pack_side(self, side=tk.LEFT, **kwargs):
-        """Упаковка на стороне"""
-        self.frame.pack(side=side, **kwargs)
+from views.widgets.searchable_combobox import SearchableCombobox
+from utils.date_utils import format_ddmmyyyy, parse_ddmmyyyy
+from views.tasks.forms import TaskFormDialog, build_task_form, collect_task_form_data
 
 
 class TasksView(TableViewTemplate):
@@ -205,29 +21,28 @@ class TasksView(TableViewTemplate):
 
     TITLE = "Задачи"
     ADD_BUTTON_TEXT = "+ Добавить задачу"
-    SEARCH_FIELDS_TEXT = "названию, описанию, клиенту"
-    COLUMNS = ("ID", "Статус", "Название", "Клиент", "Приоритет", "Срок")
+    SEARCH_FIELDS_TEXT = "комментарию, описанию, клиенту"
+    COLUMNS = ("ID", "Статус", "Комментарий", "Клиент", "Приоритет", "Срок", "Действие")
     COLUMN_WIDTHS = {
-        "ID": 50,
-        "Статус": 80,
-        "Название": 180,
+        "ID": 60,
+        "Статус": 115,
+        "Комментарий": 220,
         "Клиент": 150,
         "Приоритет": 100,
-        "Срок": 100
+        "Срок": 100,
+        "Действие": 120
     }
-    STRETCH_COLUMNS = ["Название", "Клиент"]
+    STRETCH_COLUMNS = ["Комментарий", "Клиент"]
     ID_COLUMN = "ID"
     SORT_OPTIONS = [
         ("due_date", "По сроку (ближайшие)"),
         ("due_date:DESC", "По сроку (дальние)"),
-        ("title", "По названию (А-Я)"),
-        ("title:DESC", "По названию (Я-А)"),
+        ("title", "По комментарию (А-Я)"),
+        ("title:DESC", "По комментарию (Я-А)"),
         ("priority", "По приоритету (высокий→низкий)"),
         ("priority:DESC", "По приоритету (низкий→высокий)"),
-        ("status", "По статусу (активные)"),
-        ("status:DESC", "По статусу (выполненные)"),
-        ("created_date", "По дате создания (новые)"),
-        ("created_date:DESC", "По дате создания (старые)")
+        ("created_at:DESC", "По дате создания (новые)"),
+        ("created_at", "По дате создания (старые)")
     ]
     PAGE_SIZE = 50
 
@@ -235,6 +50,12 @@ class TasksView(TableViewTemplate):
         super().__init__(parent_frame, tasks_mgr)
         self.tasks_mgr = tasks_mgr
         self.clients_mgr = clients_mgr
+        self.open_client_callback = None
+        self._row_borders = []
+        self._border_redraw_pending = False
+        self._border_redraw_job = None
+        self._action_buttons = {}
+        self._action_redraw_job = None
 
     def _on_tree_enter(self, event):
         pass
@@ -247,11 +68,164 @@ class TasksView(TableViewTemplate):
 
     def _create_table(self):
         """Создаёт Treeview таблицу с дополнительной обработкой клика на статус"""
-        # Вызываем родительский метод
+        if self._action_redraw_job is not None:
+            try:
+                self.parent_frame.after_cancel(self._action_redraw_job)
+            except tk.TclError:
+                pass
+        self._action_redraw_job = None
+        for button in self._action_buttons.values():
+            try:
+                button.destroy()
+            except tk.TclError:
+                pass
+        self._action_buttons.clear()
+        if self._border_redraw_job is not None:
+            try:
+                self.parent_frame.after_cancel(self._border_redraw_job)
+            except tk.TclError:
+                pass
+        self._border_redraw_job = None
+        self._border_redraw_pending = False
+        self._row_borders = []
         super()._create_table()
-        
-        # Добавляем обработку одинарного клика на статус
+        self.tree.tag_configure(
+            "task_completed",
+            background=Colors.TASK_COMPLETED_BG,
+            foreground=Colors.TASK_TEXT
+        )
+        self.tree.tag_configure(
+            "task_overdue",
+            background=Colors.TASK_OVERDUE_BG,
+            foreground=Colors.TASK_TEXT
+        )
+        self.tree.tag_configure(
+            "task_current",
+            background=Colors.TASK_CURRENT_BG,
+            foreground=Colors.TASK_TEXT
+        )
+        self.tree.configure(yscrollcommand=self._on_vertical_scroll)
+        self.tree.bind("<Configure>", self._schedule_row_borders, add="+")
+        self.tree.bind("<MouseWheel>", self._schedule_row_borders, add="+")
+        self.tree.bind("<Configure>", self._schedule_action_buttons, add="+")
+        self.tree.bind("<MouseWheel>", self._schedule_action_buttons, add="+")
         self.tree.bind('<Button-1>', self._on_single_click)
+
+    def _refresh_data(self):
+        super()._refresh_data()
+        if self.tree is not None:
+            self._schedule_row_borders()
+            self._schedule_action_buttons()
+
+    def _on_vertical_scroll(self, first, last):
+        self.scrollbar.set(first, last)
+        self._schedule_row_borders()
+        self._schedule_action_buttons()
+
+    def _schedule_action_buttons(self, event=None):
+        if self.tree is None or self._action_redraw_job is not None:
+            return
+        self._action_redraw_job = self.tree.after_idle(self._draw_action_buttons)
+
+    def _draw_action_buttons(self):
+        self._action_redraw_job = None
+        for item_id in self.tree.get_children(""):
+            bounds = self.tree.bbox(item_id, "Действие")
+            if not bounds:
+                button = self._action_buttons.get(item_id)
+                if button:
+                    button.place_forget()
+                continue
+
+            values = self.tree.item(item_id, "values")
+            task_id = values[0]
+            completed = values[6] == "Выполнено"
+            button = self._action_buttons.get(item_id)
+            if button is None:
+                button = tk.Button(
+                    self.tree,
+                    relief="flat",
+                    font=("Arial", 9, "bold"),
+                    padx=5,
+                    pady=1
+                )
+                self._action_buttons[item_id] = button
+
+            button.configure(
+                text="Выполнено" if completed else "✓ Выполнить",
+                state="disabled" if completed else "normal",
+                bg=Colors.TASK_COMPLETED_BG if completed else Colors.PRIMARY,
+                fg=Colors.TEXT if completed else Colors.WHITE,
+                activebackground=Colors.PRIMARY_HOVER,
+                activeforeground=Colors.WHITE,
+                cursor="" if completed else "hand2",
+                command=lambda current_id=task_id: self._complete_task(current_id)
+            )
+            x, y, width, height = bounds
+            button.place(x=x + 3, y=y + 2, width=max(width - 6, 1), height=max(height - 4, 1))
+
+        for item_id, button in tuple(self._action_buttons.items()):
+            if item_id not in self.tree.get_children(""):
+                button.destroy()
+                del self._action_buttons[item_id]
+
+    def _schedule_row_borders(self, event=None):
+        if self.tree is None or self._border_redraw_pending:
+            return
+        self._border_redraw_pending = True
+        self._border_redraw_job = self.tree.after_idle(self._draw_row_borders)
+
+    def _draw_row_borders(self):
+        self._border_redraw_job = None
+        self._border_redraw_pending = False
+        visible_rows = []
+        for item_id in self.tree.get_children(""):
+            bounds = self.tree.bbox(item_id)
+            if bounds:
+                visible_rows.append(bounds[1] + bounds[3] - 1)
+
+        while len(self._row_borders) < len(visible_rows):
+            border = tk.Frame(
+                self.tree,
+                bg=Colors.TASK_ROW_BORDER,
+                height=1,
+                bd=0,
+                highlightthickness=0
+            )
+            border.bind("<Button-1>", self._forward_border_click)
+            self._row_borders.append(border)
+
+        for index, border in enumerate(self._row_borders):
+            if index >= len(visible_rows):
+                border.place_forget()
+                continue
+            y = visible_rows[index]
+            border.place(x=0, y=y, width=self.tree.winfo_width(), height=1)
+
+    def _forward_border_click(self, event):
+        self._forward_tree_event(event, "<Button-1>")
+        return "break"
+
+    def _forward_tree_event(self, event, sequence):
+        self.tree.event_generate(
+            sequence,
+            x=event.x_root - self.tree.winfo_rootx(),
+            y=event.y_root - self.tree.winfo_rooty(),
+            state=event.state
+        )
+
+    def _get_row_tags(self, item, idx):
+        """Возвращает единый тег подсветки всей строки по текущему статусу."""
+        if item.completed:
+            return ("task_completed",)
+
+        due_date = item.due_date
+        if isinstance(due_date, datetime):
+            due_date = due_date.date()
+        if isinstance(due_date, date) and due_date < date.today():
+            return ("task_overdue",)
+
+        return ("task_current",)
 
     def _create_ui(self):
         """Создаёт весь интерфейс с улучшенной сортировкой и фильтрами"""
@@ -320,8 +294,35 @@ class TasksView(TableViewTemplate):
         if not item or not column:
             return
             
-        # Проверяем что кликнули на колонку "Статус" (вторая колонка)
-        if column == "#2":  # #2 это вторая колонка (ID, Статус, ...)
+        if column == "#4" and self.open_client_callback is not None:
+            values = self.tree.item(item, "values")
+            try:
+                task = self.tasks_mgr.get_by_id(int(values[0]))
+                client_id = getattr(task, "client_id", None) if task else None
+                if client_id is not None:
+                    self.open_client_callback(client_id)
+                else:
+                    messagebox.showwarning(
+                        "Клиент",
+                        "У этой задачи не указан клиент.",
+                        parent=self.parent_frame.winfo_toplevel()
+                    )
+            except (ValueError, IndexError, TypeError) as error:
+                messagebox.showerror(
+                    "Ошибка",
+                    f"Не удалось определить клиента задачи:\n{error}",
+                    parent=self.parent_frame.winfo_toplevel()
+                )
+            except Exception as error:
+                messagebox.showerror(
+                    "Ошибка",
+                    f"Не удалось открыть карточку клиента:\n{error}",
+                    parent=self.parent_frame.winfo_toplevel()
+                )
+            return "break"
+
+        # Кнопка действия находится в последней колонке.
+        if column == "#7":
             # Получаем ID задачи из первой колонки
             values = self.tree.item(item, 'values')
             if not values:
@@ -329,9 +330,19 @@ class TasksView(TableViewTemplate):
                 
             try:
                 task_id = int(values[0])
-                self._toggle_task_status(task_id)
+                task = self.tasks_mgr.get_by_id(task_id)
+                if task and not task.completed:
+                    self.tasks_mgr.update_task_status(task_id, True)
+                    self._refresh_data()
+                    self._refresh_related_client_task_tables()
             except (ValueError, IndexError):
                 pass
+            except Exception as error:
+                messagebox.showerror(
+                    "Ошибка",
+                    f"Не удалось изменить статус задачи:\n{error}",
+                    parent=self.parent_frame
+                )
 
     def _toggle_task_status(self, task_id):
         """Переключает статус задачи (выполнена/не выполнена)"""
@@ -349,6 +360,20 @@ class TasksView(TableViewTemplate):
             
         except Exception as e:
             print(f"Ошибка при изменении статуса задачи: {e}")
+
+    def _complete_task(self, task_id):
+        """Отмечает задачу выполненной из кнопки в её строке."""
+        try:
+            task = self.tasks_mgr.get_by_id(task_id)
+            if task and not task.completed:
+                self.tasks_mgr.update_task_status(task_id, True)
+                self._refresh_data()
+        except Exception as error:
+            messagebox.showerror(
+                "Ошибка",
+                f"Не удалось завершить задачу:\n{error}",
+                parent=self.parent_frame
+            )
 
     def _get_data(self, page, search, sort_by, sort_order):
         """Загрузка данных с пагинацией, поиском, фильтрацией и сортировкой"""
@@ -397,19 +422,21 @@ class TasksView(TableViewTemplate):
             tasks.sort(key=lambda x: priority_order.get(x.priority, 3), reverse=reverse)
         elif sort_by == "status":
             tasks.sort(key=lambda x: x.completed, reverse=reverse)
-        elif sort_by == "created_date":
-            # Если у задач есть поле created_date, используем его, иначе текущую дату
-            tasks.sort(key=lambda x: getattr(x, 'created_date', date.min), reverse=reverse)
+        elif sort_by == "created_at":
+            tasks.sort(
+                key=lambda task: getattr(task, "created_at", datetime.min),
+                reverse=reverse
+            )
             
         return tasks
 
     def _item_to_row_values(self, item):
         """Преобразует задачу в строку таблицы"""
         if not isinstance(item, Task):
-            return ("", "", "", "", "", "")
+            return ("", "", "", "", "", "", "")
         
         # Статус
-        status_icon = "✓" if item.completed else "◯"
+        status_icon = "✓ Выполнена" if item.completed else "○ Активна"
         
         # Клиент
         client_name = getattr(item, 'client_name', None)
@@ -424,7 +451,7 @@ class TasksView(TableViewTemplate):
         priority_display = f"{priority_icon} {item.priority}" if item.priority else "—"
         
         # Срок
-        due_date = item.due_date.strftime("%d.%m.%Y") if item.due_date else ""
+        due_date = format_ddmmyyyy(item.due_date)
         
         return (
             str(item.id),
@@ -432,152 +459,87 @@ class TasksView(TableViewTemplate):
             item.title,
             client_name,
             priority_display,
-            due_date
+            due_date,
+            "Выполнено" if item.completed else ""
         )
 
     def _open_create_dialog(self):
-        """Диалог создания задачи"""
+        """Открывает общую форму создания задачи."""
+        def save_task(data):
+            from services.task_service import TaskService
+
+            task_id = TaskService(self.tasks_mgr, self.clients_mgr).create_task(data)
+            if data["completed"]:
+                self.tasks_mgr.update_task_status(task_id, True)
+            self._refresh_data()
+
+        TaskFormDialog(
+            self.parent_frame,
+            self.clients_mgr,
+            save_task,
+            on_open_client=self.open_client_callback
+        )
+
+    def _legacy_open_create_dialog(self):
+        """Старая форма создания задачи, оставленная для обратной совместимости."""
         dialog, content, buttons_frame = self._create_dialog(
-            "➕ Новая задача", 
+            "➕ Новая задача",
             "600x550"
         )
-        
-        # Основная информация
-        main_fields = self._create_form_section(content, "📋 Основная информация", [
-            {'name': 'title', 'label': 'Название задачи', 'type': 'entry', 'required': True},
-            {'name': 'description', 'label': 'Описание', 'type': 'text', 'required': False, 'height': 4}
-        ])
-        
-        # Дополнительная информация
-        additional_fields = self._create_form_section(content, "⚙ Дополнительные параметры", [
-            {
-                'name': 'priority', 
-                'label': 'Приоритет', 
-                'type': 'combobox', 
-                'required': False,
-                'options': TaskPriorities.ALL,
-                'default': TaskPriorities.MEDIUM
-            }
-        ])
-        
-        # Кастомное поле для клиента с поиском
-        client_frame = tk.Frame(content, bg='white')
-        client_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
-        
-        tk.Label(
-            client_frame,
-            text="Клиент",
-            font=("Arial", 10),
-            bg='white',
-            fg='#333'
-        ).pack(anchor='w')
-        
-        client_input_frame = tk.Frame(client_frame, bg='white')
-        client_input_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        client_var = tk.StringVar(value="Без клиента")
-        client_combo = SearchableCombobox(
-            client_input_frame,
-            values=self._get_client_options(),
-            font=("Arial", 11)
-        )
-        client_combo.pack_side(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Поле даты с календарем
+
+        # Используем build_task_form для создания виджетов
+        widgets = build_task_form(content, self.clients_mgr, defaults=None)
+
+        # Упакуем виджеты в удобный вид
+        tk.Label(content, text="📋 Основная информация", font=("Arial", 12, "bold"), bg='white').pack(anchor='w', padx=20, pady=(10, 5))
+        tk.Label(content, text="Название задачи", bg='white').pack(anchor='w', padx=20)
+        widgets['title'].pack(fill=tk.X, padx=20, pady=(2, 8))
+        tk.Label(content, text="Описание", bg='white').pack(anchor='w', padx=20)
+        widgets['description'].pack(fill=tk.X, padx=20, pady=(2, 8))
+
+        tk.Label(content, text="⚙ Дополнительные параметры", font=("Arial", 12, "bold"), bg='white').pack(anchor='w', padx=20, pady=(10, 5))
+        tk.Label(content, text="Приоритет", bg='white').pack(anchor='w', padx=20)
+        widgets['priority'].pack(fill=tk.X, padx=20, pady=(2, 8))
+
+        tk.Label(content, text="Клиент", bg='white').pack(anchor='w', padx=20)
+        widgets['client_combo'].pack_side(side=tk.LEFT, fill=tk.X, expand=True, padx=20, pady=(2, 8))
+
+        # Дата с календарём
+        tk.Label(content, text="Срок выполнения", bg='white').pack(anchor='w', padx=20)
         date_frame = tk.Frame(content, bg='white')
-        date_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-        
-        tk.Label(
-            date_frame,
-            text="Срок выполнения",
-            font=("Arial", 10),
-            bg='white',
-            fg='#333'
-        ).pack(anchor='w')
-        
-        date_input_frame = tk.Frame(date_frame, bg='white')
-        date_input_frame.pack(fill=tk.X, pady=(5, 0))
-        
-        due_date_var = tk.StringVar(value=date.today().strftime("%d.%m.%Y"))
-        due_date_entry = tk.Entry(
-            date_input_frame,
-            textvariable=due_date_var,
-            font=("Arial", 11),
-            relief="solid",
-            borderwidth=1
-        )
-        due_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
+        date_frame.pack(fill=tk.X, padx=20, pady=(2, 8))
+        due_entry = tk.Entry(date_frame, textvariable=widgets['due_date_var'], font=("Arial", 11), relief="solid", borderwidth=1)
+        due_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         def show_calendar():
-            """Показать календарь для выбора даты"""
             cal_dialog = CalendarDialog(dialog, "Выберите срок выполнения")
             selected_date = cal_dialog.show()
             if selected_date:
-                due_date_var.set(selected_date.strftime("%d.%m.%Y"))
-        
-        tk.Button(
-            date_input_frame,
-            text="📅",
-            command=show_calendar,
-            bg="#41a5be",
-            fg="white",
-            font=("Arial", 10),
-            width=3
-        ).pack(side=tk.RIGHT, padx=(5, 0))
-        
+                widgets['due_date_var'].set(selected_date.strftime("%d.%m.%Y"))
+
+        tk.Button(date_frame, text="📅", command=show_calendar, bg="#41a5be", fg="white", font=("Arial", 10), width=3).pack(side=tk.RIGHT, padx=(5, 0))
+
         def save_task():
-            """Сохранение новой задачи"""
             try:
-                # Валидация
-                title = main_fields['title'].get().strip()
-                if not title:
-                    show_message(dialog, "Ошибка", "Укажите название задачи", "error")
-                    return
-                
-                # Сбор данных
-                description = main_fields['description'].get('1.0', tk.END).strip()
-                
-                # Клиент
-                client_name = client_var.get()
-                client_id = None
-                if client_name and client_name != "Без клиента":
-                    all_clients = self.clients_mgr.get_all()
-                    for client in all_clients:
-                        if client.get('company') == client_name:
-                            client_id = client.get('id')
-                            break
-                
-                # Приоритет
-                priority = additional_fields['priority'].get() or TaskPriorities.MEDIUM
-                
-                # Срок
-                due_date_str = due_date_var.get().strip()
-                due_date = None
-                if due_date_str:
-                    try:
-                        due_date = datetime.strptime(due_date_str, "%d.%m.%Y").date()
-                    except ValueError:
-                        show_message(dialog, "Ошибка", "Неверный формат даты. Используйте ДД.ММ.ГГГГ", "error")
-                        return
-                
-                # Создаем задачу через менеджер с отдельными параметрами
+                data = collect_task_form_data(widgets, self.clients_mgr)
+                # Создаём задачу через менеджер
                 self.tasks_mgr.add(
-                    title=title,
-                    description=description,
-                    priority=priority,
-                    client_id=client_id,
-                    due_date=due_date
+                    title=data['title'],
+                    description=data['description'],
+                    due_date=data['due_date'],
+                    client_id=data['client_id'],
+                    priority=data['priority']
                 )
-                
                 show_message(dialog, "Успех", "Задача успешно создана!", "success")
                 dialog.destroy()
                 self._refresh_data()
-                
+            except ValueError as ve:
+                show_message(dialog, "Ошибка", str(ve), "error")
             except Exception as e:
                 show_message(dialog, "Ошибка", f"Произошла ошибка: {str(e)}", "error")
-        
-        self._create_dialog_buttons(buttons_frame, save_task)
 
+        self._create_dialog_buttons(buttons_frame, save_task)
+     
     def _on_row_double_click(self, task_id):
         """Открыть диалог редактирования задачи"""
         self._edit_task(task_id)
@@ -592,7 +554,58 @@ class TasksView(TableViewTemplate):
             return ["Без клиента"]
 
     def _edit_task(self, task_id):
-        """Диалог редактирования задачи"""
+        """Открывает общую форму редактирования задачи."""
+        task = self.tasks_mgr.get_by_id(task_id)
+        if not task:
+            messagebox.showerror(
+                "Ошибка",
+                f"Задача с ID {task_id} не найдена.",
+                parent=self.parent_frame
+            )
+            return
+
+        def save_task(data):
+            from services.task_service import TaskService
+
+            data["status"] = data.pop("completed")
+            TaskService(self.tasks_mgr, self.clients_mgr).update_task(task_id, data)
+            self._refresh_data()
+            self._refresh_related_client_task_tables()
+
+        def delete_task():
+            if not messagebox.askyesno(
+                "Подтверждение",
+                "Удалить задачу?",
+                parent=dialog.dialog
+            ):
+                return
+            self.tasks_mgr.delete(task_id)
+            dialog.dialog.destroy()
+            self._refresh_data()
+            self._refresh_related_client_task_tables()
+
+        dialog = TaskFormDialog(
+            self.parent_frame,
+            self.clients_mgr,
+            save_task,
+            task=task,
+            on_delete=delete_task,
+            on_open_client=self.open_client_callback
+        )
+
+    def _refresh_related_client_task_tables(self):
+        """Обновляет таблицы задач клиентов, если они открыты."""
+        def refresh_tables(widget):
+            task_table = getattr(widget, "_tasks_table", None)
+            if task_table is not None and hasattr(task_table, "refresh"):
+                task_table.refresh()
+            for child in widget.winfo_children():
+                refresh_tables(child)
+
+        refresh_tables(self.parent_frame.winfo_toplevel())
+
+    def _legacy_edit_task(self, task_id):
+        """Старая форма редактирования задачи, оставленная для совместимости."""
         try:
             task = self.tasks_mgr.get_by_id(task_id)
             if not task:
@@ -604,170 +617,72 @@ class TasksView(TableViewTemplate):
                 "600x600"
             )
 
-            # Основная информация
-            main_fields = self._create_form_section(content, "📋 Основная информация", [
-                {
-                    'name': 'title',
-                    'label': 'Название задачи',
-                    'type': 'entry',
-                    'required': True,
-                    'default': task.title
-                },
-                {
-                    'name': 'description',
-                    'label': 'Описание',
-                    'type': 'text',
-                    'required': False,
-                    'height': 4,
-                    'default': task.description or ''
-                }
-            ])
+            defaults = {
+                'title': task.title,
+                'description': task.description or '',
+                'priority': task.priority or TaskPriorities.MEDIUM,
+                'client_name': self._get_current_client_name(task),
+                'due_date': task.due_date,
+                'completed': task.completed
+            }
 
-            # Дополнительная информация
-            additional_fields = self._create_form_section(content, "⚙ Дополнительные параметры", [
-                {
-                    'name': 'priority',
-                    'label': 'Приоритет',
-                    'type': 'combobox',
-                    'required': False,
-                    'options': TaskPriorities.ALL,
-                    'default': task.priority or TaskPriorities.MEDIUM
-                }
-            ])
-            
-            # Кастомное поле для клиента с поиском
-            client_frame = tk.Frame(content, bg='white')
-            client_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
-            
-            tk.Label(
-                client_frame,
-                text="Клиент",
-                font=("Arial", 10),
-                bg='white',
-                fg='#333'
-            ).pack(anchor='w')
-            
-            client_input_frame = tk.Frame(client_frame, bg='white')
-            client_input_frame.pack(fill=tk.X, pady=(5, 0))
-            
-            edit_client_var = tk.StringVar(value=self._get_current_client_name(task))
-            edit_client_combo = SearchableCombobox(
-                client_input_frame,
-                values=self._get_client_options(),
-                font=("Arial", 11)
-            )
-            edit_client_combo.pack_side(side=tk.LEFT, fill=tk.X, expand=True)
-            
-            # Поле даты с календарем
+            widgets = build_task_form(content, self.clients_mgr, defaults=defaults)
+
+            # Упаковка виджетов
+            tk.Label(content, text="📋 Основная информация", font=("Arial", 12, "bold"), bg='white').pack(anchor='w', padx=20, pady=(10, 5))
+            tk.Label(content, text="Название задачи", bg='white').pack(anchor='w', padx=20)
+            widgets['title'].pack(fill=tk.X, padx=20, pady=(2, 8))
+            tk.Label(content, text="Описание", bg='white').pack(anchor='w', padx=20)
+            widgets['description'].pack(fill=tk.X, padx=20, pady=(2, 8))
+
+            tk.Label(content, text="⚙ Дополнительные параметры", font=("Arial", 12, "bold"), bg='white').pack(anchor='w', padx=20, pady=(10, 5))
+            tk.Label(content, text="Приоритет", bg='white').pack(anchor='w', padx=20)
+            widgets['priority'].pack(fill=tk.X, padx=20, pady=(2, 8))
+
+            tk.Label(content, text="Клиент", bg='white').pack(anchor='w', padx=20)
+            widgets['client_combo'].pack_side(side=tk.LEFT, fill=tk.X, expand=True, padx=20, pady=(2, 8))
+
+            tk.Label(content, text="Срок выполнения", bg='white').pack(anchor='w', padx=20)
             date_frame = tk.Frame(content, bg='white')
-            date_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-            
-            tk.Label(
-                date_frame,
-                text="Срок выполнения",
-                font=("Arial", 10),
-                bg='white',
-                fg='#333'
-            ).pack(anchor='w')
-            
-            date_input_frame = tk.Frame(date_frame, bg='white')
-            date_input_frame.pack(fill=tk.X, pady=(5, 0))
-            
-            edit_due_date_var = tk.StringVar(value=task.due_date.strftime("%d.%m.%Y") if task.due_date else "")
-            edit_due_date_entry = tk.Entry(
-                date_input_frame,
-                textvariable=edit_due_date_var,
-                font=("Arial", 11),
-                relief="solid",
-                borderwidth=1
-            )
-            edit_due_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            
+            date_frame.pack(fill=tk.X, padx=20, pady=(2, 8))
+            due_entry = tk.Entry(date_frame, textvariable=widgets['due_date_var'], font=("Arial", 11), relief="solid", borderwidth=1)
+            due_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
             def show_edit_calendar():
-                """Показать календарь для выбора даты"""
                 cal_dialog = CalendarDialog(dialog, "Выберите срок выполнения")
                 selected_date = cal_dialog.show()
                 if selected_date:
-                    edit_due_date_var.set(selected_date.strftime("%d.%m.%Y"))
-            
-            tk.Button(
-                date_input_frame,
-                text="📅",
-                command=show_edit_calendar,
-                bg="#41a5be",
-                fg="white",
-                font=("Arial", 10),
-                width=3
-            ).pack(side=tk.RIGHT, padx=(5, 0))
+                    widgets['due_date_var'].set(selected_date.strftime("%d.%m.%Y"))
 
-            # Статус выполнения
+            tk.Button(date_frame, text="📅", command=show_edit_calendar, bg="#41a5be", fg="white", font=("Arial", 10), width=3).pack(side=tk.RIGHT, padx=(5, 0))
+
+            # Статус
             status_frame = tk.Frame(content, bg='white')
             status_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-            
-            completed_var = tk.BooleanVar(value=task.completed)
-            tk.Checkbutton(
-                status_frame,
-                text="✓ Задача выполнена",
-                variable=completed_var,
-                bg='white',
-                font=("Arial", 11, "bold")
-            ).pack(anchor='w')
+            tk.Checkbutton(status_frame, text="✓ Задача выполнена", variable=widgets['completed_var'], bg='white', font=("Arial", 11, "bold")).pack(anchor='w')
 
             def save_task():
-                """Сохранение изменений"""
                 try:
-                    # Валидация
-                    title = main_fields['title'].get().strip()
-                    if not title:
-                        show_message(dialog, "Ошибка", "Укажите название задачи", "error")
-                        return
-
-                    # Сбор данных
-                    description = main_fields['description'].get('1.0', tk.END).strip()
-                    
-                    # Клиент
-                    client_name = edit_client_var.get()
-                    client_id = None
-                    if client_name and client_name != "Без клиента":
-                        all_clients = self.clients_mgr.get_all()
-                        for client in all_clients:
-                            if client.get('company') == client_name:
-                                client_id = client.get('id')
-                                break
-
-                    # Приоритет
-                    priority = additional_fields['priority'].get() or TaskPriorities.MEDIUM
-
-                    # Срок
-                    due_date_str = edit_due_date_var.get().strip()
-                    due_date = None
-                    if due_date_str:
-                        try:
-                            due_date = datetime.strptime(due_date_str, "%d.%m.%Y").date()
-                        except ValueError:
-                            show_message(dialog, "Ошибка", "Неверный формат даты. Используйте ДД.ММ.ГГГГ", "error")
-                            return
-
-                    # Обновляем задачу через менеджер
+                    data = collect_task_form_data(widgets, self.clients_mgr)
+                    # Обновляем через менеджер
                     self.tasks_mgr.update_task(
-                        task_id=task_id,
-                        title=title,
-                        description=description,
-                        status=completed_var.get(),
-                        priority=priority,
-                        due_date=due_date,
-                        client_id=client_id
+                        task_id,
+                        data['title'],
+                        data['description'],
+                        data['completed'],
+                        data['priority'],
+                        data['due_date'],
+                        data['client_id']
                     )
-
                     show_message(dialog, "Успех", "Изменения сохранены!", "success")
                     dialog.destroy()
                     self._refresh_data()
-
+                except ValueError as ve:
+                    show_message(dialog, "Ошибка", str(ve), "error")
                 except Exception as e:
                     show_message(dialog, "Ошибка", f"Произошла ошибка: {str(e)}", "error")
 
             def delete_task():
-                """Удаление задачи"""
                 if messagebox.askyesno("Подтверждение", "Удалить задачу?", parent=dialog):
                     self.tasks_mgr.delete(task_id)
                     show_message(dialog, "Успех", "Задача удалена!", "success")
@@ -775,44 +690,12 @@ class TasksView(TableViewTemplate):
                     self._refresh_data()
 
             # Кнопки
-            tk.Button(
-                buttons_frame,
-                text="💾 Сохранить",
-                command=save_task,
-                bg="#28a745",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                cursor="hand2",
-                padx=20,
-                pady=10
-            ).pack(side=tk.LEFT, padx=5)
-
-            tk.Button(
-                buttons_frame,
-                text="🗑️ Удалить",
-                command=delete_task,
-                bg="#dc3545",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                cursor="hand2",
-                padx=20,
-                pady=10
-            ).pack(side=tk.LEFT, padx=5)
-
-            tk.Button(
-                buttons_frame,
-                text="✖ Отмена",
-                command=dialog.destroy,
-                bg="#6c757d",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                cursor="hand2",
-                padx=20,
-                pady=10
-            ).pack(side=tk.LEFT, padx=5)
+            tk.Button(buttons_frame, text="💾 Сохранить", command=save_task, bg="#28a745", fg="white", font=("Arial", 12, "bold"), cursor="hand2", padx=20, pady=10).pack(side=tk.LEFT, padx=5)
+            tk.Button(buttons_frame, text="🗑️ Удалить", command=delete_task, bg="#dc3545", fg="white", font=("Arial", 12, "bold"), cursor="hand2", padx=20, pady=10).pack(side=tk.LEFT, padx=5)
+            tk.Button(buttons_frame, text="✖ Отмена", command=dialog.destroy, bg="#6c757d", fg="white", font=("Arial", 12, "bold"), cursor="hand2", padx=20, pady=10).pack(side=tk.LEFT, padx=5)
 
         except Exception as e:
-            show_message(self.parent_frame, "Ошибка", f"Произошла ошибка: {str(e)}", "error")
+             show_message(self.parent_frame, "Ошибка", f"Произошла ошибка: {str(e)}", "error")
 
     def _get_current_client_name(self, task):
         """Получить имя текущего клиента задачи"""

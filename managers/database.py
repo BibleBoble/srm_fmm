@@ -49,7 +49,14 @@ class Database:
         """Настройка логгера для БД"""
         logger = logging.getLogger('SRM.Database')
         logger.setLevel(logging.INFO)
-        
+
+        # Если логгер уже настроен — возвращаем его (предотвращаем дублирование обработчиков)
+        if logger.handlers:
+            return logger
+
+        # Снижаем распространение к родительским логгерам
+        logger.propagate = False
+
         # Создаем директорию для логов если её нет
         Path('logs').mkdir(exist_ok=True)
         
@@ -92,7 +99,7 @@ class Database:
             try:
                 self._connection.execute("PRAGMA journal_mode = WAL")
                 self._connection.execute("PRAGMA synchronous = NORMAL")
-            except sqlite3.Error:
+            except sqlite3.Error as e:
                 self.logger.warning(f"Не удалось установить WAL режим: {e}")
             
             self.logger.info(f"Подключение к БД '{self.db_path}' установлено")
@@ -124,6 +131,33 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Existing clients keep their internal IDs and receive no public code.
+            client_columns = {
+                row["name"] for row in cursor.execute("PRAGMA table_info(clients)").fetchall()
+            }
+            if "public_id" not in client_columns:
+                cursor.execute("ALTER TABLE clients ADD COLUMN public_id TEXT")
+            partner_columns = {
+                "full_legal_name": "TEXT",
+                "legal_address": "TEXT",
+                "postal_address": "TEXT",
+                "ogrn": "TEXT",
+                "inn_kpp": "TEXT",
+                "bank_details": "TEXT",
+                "responsible_person": "TEXT",
+                "partner_email": "TEXT",
+                "partner_phone": "TEXT",
+            }
+            for column_name, column_type in partner_columns.items():
+                if column_name not in client_columns:
+                    cursor.execute(
+                        f"ALTER TABLE clients ADD COLUMN {column_name} {column_type}"
+                    )
+            cursor.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_public_id "
+                "ON clients(public_id) WHERE public_id IS NOT NULL"
+            )
             
             # ============================================
             # ТАБЛИЦА 2: КОНТАКТНЫЕ ЛИЦА КЛИЕНТОВ
@@ -197,6 +231,7 @@ class Database:
                     description TEXT,
                     due_date DATE,
                     completed INTEGER DEFAULT 0,
+                    status TEXT DEFAULT 'Новая',
                     priority TEXT DEFAULT 'Средний',
                     client_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -212,6 +247,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS experts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
+                    notes TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -378,11 +414,11 @@ class Database:
     def execute_many(self, query: str, params_list: List[Tuple]) -> bool:
         """
         Выполнить множественную вставку (batch insert)
-        
+
         Args:
             query: SQL запрос
             params_list: Список кортежей с параметрами
-            
+
         Returns:
             True если успешно, False при ошибке
         """
@@ -391,31 +427,31 @@ class Database:
                 cursor = self._connection.cursor()
                 cursor.executemany(query, params_list)
                 self._connection.commit()
-                
+
                 self.logger.info(f"Batch insert: {len(params_list)} записей")
                 return True
-                
+
             except sqlite3.Error as e:
                 error_msg = f"Ошибка batch insert: {e}"
                 self.logger.error(error_msg)
                 print(f"[ERR] {error_msg}")
-                
+
                 self._connection.rollback()
                 return False
 
     def get_table_info(self, table_name: str) -> List[Dict[str, Any]]:
         """
         Получить информацию о структуре таблицы
-        
+
         Args:
             table_name: Название таблицы
-            
+
         Returns:
             Список словарей с информацией о колонках
         """
         query = f"PRAGMA table_info({table_name})"
         rows = self.fetch_all(query)
-        
+
         return [
             {
                 'cid': row['cid'],
@@ -431,7 +467,7 @@ class Database:
     def get_all_tables(self) -> List[str]:
         """
         Получить список всех таблиц в БД
-        
+
         Returns:
             Список названий таблиц
         """
@@ -446,7 +482,7 @@ class Database:
     def vacuum(self) -> bool:
         """
         Оптимизация БД (очистка неиспользуемого пространства)
-        
+
         Returns:
             True если успешно
         """
@@ -465,10 +501,10 @@ class Database:
     def backup(self, backup_path: str) -> bool:
         """
         Создать резервную копию БД
-        
+
         Args:
             backup_path: Путь к файлу резервной копии
-            
+
         Returns:
             True если успешно
         """
@@ -477,11 +513,11 @@ class Database:
                 backup_conn = sqlite3.connect(backup_path)
                 self._connection.backup(backup_conn)
                 backup_conn.close()
-                
+
                 self.logger.info(f"Создана резервная копия: {backup_path}")
                 print(f"[OK] Создана резервная копия: {backup_path}")
                 return True
-                
+
             except sqlite3.Error as e:
                 error_msg = f"Ошибка создания резервной копии: {e}"
                 self.logger.error(error_msg)
@@ -494,7 +530,7 @@ class Database:
             self._connection.close()
             self.logger.info("Соединение с БД закрыто")
             print("[OK] Соединение с БД закрыто")
-            
+
             # Сбрасываем singleton для возможности переподключения
             Database._instance = None
             Database._connection = None
@@ -519,13 +555,14 @@ class Database:
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ============================================
 
+
 def get_db_stats(db: Database) -> Dict[str, Any]:
     """
     Получить статистику БД
-    
+
     Args:
         db: Экземпляр Database
-        
+
     Returns:
         Словарь со статистикой
     """
@@ -533,23 +570,23 @@ def get_db_stats(db: Database) -> Dict[str, Any]:
         'tables': {},
         'total_records': 0
     }
-    
+
     tables = db.get_all_tables()
     for table in tables:
         count_query = f"SELECT COUNT(*) as count FROM {table}"
         result = db.fetch_one(count_query)
         count = result['count'] if result else 0
-        
+
         stats['tables'][table] = count
         stats['total_records'] += count
-    
+
     return stats
 
 
 def print_db_info(db: Database) -> None:
     """
     Вывести информацию о БД в консоль
-    
+
     Args:
         db: Экземпляр Database
     """
@@ -558,14 +595,14 @@ def print_db_info(db: Database) -> None:
     print("=" * 50)
     print(f"Путь: {db.db_path}")
     print(f"Подключение: {'[OK] Активно' if db._connection else '[!] Не подключено'}")
-    
+
     stats = get_db_stats(db)
     print(f"\nВсего записей: {stats['total_records']}")
     print("\nТаблицы:")
-    
+
     for table, count in sorted(stats['tables'].items()):
         print(f"  • {table:30} {count:>6} записей")
-    
+
     print("=" * 50 + "\n")
 
 
@@ -576,32 +613,32 @@ def print_db_info(db: Database) -> None:
 if __name__ == "__main__":
     # Тестирование Database
     print("Тестирование Database...")
-    
+
     # Создаем тестовую БД
     db = Database("test_database.db")
-    
+
     # Выводим информацию
     print_db_info(db)
-    
+
     # Тестируем вставку
     client_id = db.execute(
         "INSERT INTO clients (company, address) VALUES (?, ?)",
         ("Тестовая компания", "Тестовый адрес")
     )
     print(f"[OK] Добавлен клиент с ID: {client_id}")
-    
+
     # Тестируем выборку
     clients = db.fetch_all("SELECT * FROM clients")
     print(f"[OK] Найдено клиентов: {len(clients)}")
-    
+
     # Тестируем информацию о таблице
     table_info = db.get_table_info('clients')
     print(f"[OK] Структура таблицы clients: {len(table_info)} колонок")
-    
+
     # Создаем резервную копию
     db.backup("test_backup.db")
-    
+
     # Закрываем
     db.close()
-    
+
     print("\n[OK] Все тесты пройдены!")

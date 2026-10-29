@@ -3,10 +3,11 @@
 Представление раздела "Эксперты" на базе TableViewTemplate
 """
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from views.table_view_template import TableViewTemplate
 from utils.helpers import show_message
-from utils.constants import TableView
+from utils.constants import Colors, TableView
+from utils.ui_helpers import center_toplevel
 
 
 class ExpertsView(TableViewTemplate):
@@ -732,10 +733,12 @@ class ExpertsView(TableViewTemplate):
     def _open_expert_card(self, expert):
         card_window = tk.Toplevel(self.parent_frame)
         card_window.title(f"Карточка эксперта: {expert.get('name', '')}")
-        card_window.geometry("900x700")
-        card_window.configure(bg='white')
+        card_window.geometry("1100x820")
+        card_window.minsize(1000, 740)
+        card_window.configure(bg=Colors.LIGHT)
+        center_toplevel(card_window)
 
-        header = tk.Frame(card_window, bg='#333333', height=60)
+        header = tk.Frame(card_window, bg=Colors.DARK, height=60)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
@@ -743,16 +746,16 @@ class ExpertsView(TableViewTemplate):
             header,
             text=f"🏢 {expert.get('name', '—')}",
             font=("Arial", 18, "bold"),
-            fg="white",
-            bg='#333333'
+            fg=Colors.WHITE,
+            bg=Colors.DARK
         ).pack(side=tk.LEFT, padx=20, pady=15)
 
         tk.Label(
             header,
             text=f"ID: {expert.get('id', '')}",
             font=("Arial", 12),
-            fg="#41a5be",
-            bg='#333333'
+            fg=Colors.INFO,
+            bg=Colors.DARK
         ).pack(side=tk.RIGHT, padx=20, pady=15)
 
         notebook = ttk.Notebook(card_window)
@@ -770,39 +773,82 @@ class ExpertsView(TableViewTemplate):
         notebook.add(tab_specs, text="🛠 Виды работ")
         self._create_expert_specializations_tab(tab_specs, expert.get('specializations', []))
 
-        buttons_container = tk.Frame(card_window, bg='#f0f0f0', height=80)
+        buttons_container = tk.Frame(card_window, bg=Colors.SURFACE, height=76)
         buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
         buttons_container.pack_propagate(False)
 
-        buttons_frame = tk.Frame(buttons_container, bg='#f0f0f0')
-        buttons_frame.place(relx=0.5, rely=0.5, anchor='center')
+        buttons_frame = tk.Frame(buttons_container, bg=Colors.SURFACE)
+        buttons_frame.pack(fill=tk.X, padx=20, pady=14)
 
         expert_id = expert.get('id')
         tk.Button(
             buttons_frame,
-            text="✏ Редактировать",
-            command=lambda: (card_window.destroy(), self._edit_expert(expert_id)),
-            bg="#28a745",
-            fg="white",
-            font=("Arial", 12, "bold"),
+            text="Удалить",
+            command=lambda: self._delete_expert_from_card(
+                expert_id,
+                expert.get('name', ''),
+                card_window
+            ),
+            bg=Colors.DANGER,
+            fg=Colors.WHITE,
+            activebackground=Colors.DANGER_HOVER,
+            activeforeground=Colors.WHITE,
+            font=("Arial", 10, "bold"),
             relief="flat",
-            width=18,
-            height=1,
-            cursor="hand2"
-        ).pack(side=tk.LEFT, padx=10)
+            cursor="hand2",
+            padx=16,
+            pady=9
+        ).pack(side=tk.LEFT)
 
         tk.Button(
             buttons_frame,
             text="Закрыть",
             command=card_window.destroy,
-            bg="#6c757d",
-            fg="white",
-            font=("Arial", 12, "bold"),
+            bg=Colors.LIGHT,
+            fg=Colors.TEXT,
+            activebackground=Colors.BORDER,
+            activeforeground=Colors.TEXT,
+            font=("Arial", 10, "bold"),
             relief="flat",
-            width=15,
-            height=1,
-            cursor="hand2"
-        ).pack(side=tk.LEFT, padx=10, pady=10)
+            cursor="hand2",
+            padx=16,
+            pady=9
+        ).pack(side=tk.RIGHT, padx=(10, 0))
+
+        tk.Button(
+            buttons_frame,
+            text="Редактировать",
+            command=lambda: (card_window.destroy(), self._edit_expert(expert_id)),
+            bg=Colors.PRIMARY,
+            fg=Colors.WHITE,
+            activebackground=Colors.PRIMARY_HOVER,
+            activeforeground=Colors.WHITE,
+            font=("Arial", 10, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=16,
+            pady=9
+        ).pack(side=tk.RIGHT)
+
+    def _delete_expert_from_card(self, expert_id, expert_name, card_window):
+        """Удаляет эксперта после подтверждения и обновляет таблицу."""
+        if not messagebox.askyesno(
+            "Подтверждение",
+            f"Удалить эксперта «{expert_name}»?",
+            parent=card_window
+        ):
+            return
+
+        try:
+            self.experts_mgr.delete_expert(expert_id)
+            card_window.destroy()
+            self._refresh_data()
+        except Exception as error:
+            messagebox.showerror(
+                "Ошибка",
+                f"Не удалось удалить эксперта:\n{error}",
+                parent=card_window if card_window.winfo_exists() else self.parent_frame
+            )
 
     def _create_expert_main_tab(self, parent, expert):
         tk.Label(
@@ -830,106 +876,130 @@ class ExpertsView(TableViewTemplate):
         info_frame.grid_columnconfigure(1, weight=1)
 
     def _create_expert_contacts_tab(self, parent, expert_id, contacts, card_window):
+        header_frame = tk.Frame(parent, bg="#f8f9fa")
+        header_frame.pack(fill=tk.X, padx=15, pady=(20, 10))
+
         tk.Label(
-            parent,
+            header_frame,
             text="Контактные лица",
             font=("Arial", 16, "bold"),
-            bg='white'
-        ).pack(pady=(20, 10))
+            bg="#f8f9fa",
+            fg="#333"
+        ).pack(side=tk.LEFT)
 
-        btn_frame = tk.Frame(parent, bg='white')
-        btn_frame.pack(side=tk.BOTTOM, pady=(10, 20))
+        sort_var = tk.StringVar(value="По ФИО (А-Я)")
+        sort_options = [
+            "По ФИО (А-Я)",
+            "По ФИО (Я-А)",
+            "По должности (А-Я)",
+            "По должности (Я-А)"
+        ]
+        sort_combo = ttk.Combobox(
+            header_frame,
+            textvariable=sort_var,
+            values=sort_options,
+            state="readonly",
+            width=20,
+            font=("Arial", 9)
+        )
+        sort_combo.pack(side=tk.RIGHT, padx=(5, 10))
+        tk.Label(
+            header_frame,
+            text="Сортировка:",
+            font=("Arial", 10),
+            bg="#f8f9fa",
+            fg="#666"
+        ).pack(side=tk.RIGHT, padx=(0, 5))
 
         if expert_id:
             tk.Button(
-                btn_frame,
-                text="✏ Редактировать контакты",
-                command=lambda: (card_window.destroy(), self._edit_expert(expert_id)),
-                bg="#41a5be",
+                header_frame,
+                text="+ Добавить контакт",
+                command=lambda: self._edit_expert_from_contacts(expert_id, card_window),
+                bg="#28a745",
                 fg="white",
-                font=("Arial", 11),
+                font=("Arial", 11, "bold"),
                 relief="flat",
-                padx=20,
-                pady=8,
                 cursor="hand2"
-            ).pack()
+            ).pack(side=tk.RIGHT, padx=10)
 
-        if not contacts:
-            tk.Label(
-                parent,
-                text="Контактных лиц нет",
-                font=("Arial", 12),
-                fg="gray",
-                bg='white'
-            ).pack(pady=30)
-            return
+        table_frame = tk.Frame(parent, bg="white")
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 20))
 
-        canvas = tk.Canvas(parent, bg='white')
-        scrollbar = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg='white')
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        tree = ttk.Treeview(
+            table_frame,
+            columns=("ID", "ФИО", "Должность", "Телефон", "Email"),
+            show="headings",
+            selectmode="browse"
+        )
+        column_widths = {
+            "ID": (50, 50),
+            "ФИО": (200, 150),
+            "Должность": (150, 120),
+            "Телефон": (120, 100),
+            "Email": (200, 150)
+        }
+        for column, (width, min_width) in column_widths.items():
+            tree.heading(column, text=column)
+            tree.column(
+                column,
+                width=width,
+                minwidth=min_width,
+                stretch=column in ("ФИО", "Должность", "Email"),
+                anchor="center" if column == "ID" else "w"
+            )
+        tree.tag_configure(
+            "primary",
+            background=Colors.COMPLETED_BG,
+            foreground=Colors.COMPLETED_FG
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        def on_mouse_wheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
-
-        for contact in contacts:
-            contact_frame = tk.Frame(scrollable_frame, bg='#f8f9fa', relief='solid', bd=1)
-            contact_frame.pack(padx=20, pady=10, fill=tk.X)
-
-            header_frame = tk.Frame(contact_frame, bg='#f8f9fa')
-            header_frame.pack(fill=tk.X, padx=15, pady=(10, 5))
-
-            primary_label = " ⭐ ОСНОВНОЙ" if contact.get('is_primary') else ""
-
-            tk.Label(
-                header_frame,
-                text=f"👤 {contact.get('full_name', '—')}{primary_label}",
-                font=("Arial", 14, "bold"),
-                bg='#f8f9fa'
-            ).pack(side=tk.LEFT)
-
-            info_frame = tk.Frame(contact_frame, bg='#f8f9fa')
-            info_frame.pack(fill=tk.X, padx=20, pady=(5, 10))
-
-            if contact.get('position'):
-                tk.Label(
-                    info_frame,
-                    text=f"📋 Должность: {contact.get('position')}",
-                    font=("Arial", 11),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-            if contact.get('phone'):
-                tk.Label(
-                    info_frame,
-                    text=f"📞 Телефон: {contact.get('phone')}",
-                    font=("Arial", 11),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-            if contact.get('email'):
-                tk.Label(
-                    info_frame,
-                    text=f"📧 Email: {contact.get('email')}",
-                    font=("Arial", 11),
-                    bg='#f8f9fa',
-                    fg='#666'
-                ).pack(anchor='w', pady=2)
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        def load_contacts(*_args):
+            for item in tree.get_children():
+                tree.delete(item)
+
+            reverse = sort_var.get().endswith("(Я-А)")
+            sort_by_position = "должности" in sort_var.get()
+            sorted_contacts = sorted(
+                contacts or [],
+                key=lambda contact: str(
+                    contact.get("position" if sort_by_position else "full_name") or ""
+                ).casefold(),
+                reverse=reverse
+            )
+            for contact in sorted_contacts:
+                contact_id = contact.get("id", "")
+                tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        contact_id,
+                        contact.get("full_name") or "—",
+                        contact.get("position") or "—",
+                        contact.get("phone") or "—",
+                        contact.get("email") or "—"
+                    ),
+                    tags=("primary",) if contact.get("is_primary") else ()
+                )
+
+        def edit_contacts(_event=None):
+            if expert_id:
+                self._edit_expert_from_contacts(expert_id, card_window)
+
+        sort_combo.bind("<<ComboboxSelected>>", load_contacts)
+        tree.bind("<Double-1>", edit_contacts)
+        load_contacts()
+
+    def _edit_expert_from_contacts(self, expert_id, card_window):
+        """Open the expert form to add or edit contact details."""
+        if card_window.winfo_exists():
+            card_window.destroy()
+        self._edit_expert(expert_id)
 
     def _create_expert_specializations_tab(self, parent, specializations):
         tk.Label(

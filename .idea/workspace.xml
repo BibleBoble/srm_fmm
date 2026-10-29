@@ -6,6 +6,20 @@
   <component name="ChangeListManager">
     <list default="true" id="f7441b0f-f4a1-4f11-b8b8-5557a2586686" name="Changes" comment="переделан раздел информации о клиенте, но не доработан">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database.db" beforeDir="false" afterPath="$PROJECT_DIR$/database.db" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database.db-shm" beforeDir="false" afterPath="$PROJECT_DIR$/database.db-shm" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/database.db-wal" beforeDir="false" afterPath="$PROJECT_DIR$/database.db-wal" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/logs/database.log" beforeDir="false" afterPath="$PROJECT_DIR$/logs/database.log" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/clients_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/clients_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/contact_persons_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/contact_persons_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/database.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/database.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/managers/tasks_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/managers/tasks_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/client.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/client.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/contact_person.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/contact_person.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/models/task.py" beforeDir="false" afterPath="$PROJECT_DIR$/models/task.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/utils/constants.py" beforeDir="false" afterPath="$PROJECT_DIR$/utils/constants.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/clients_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/clients_view.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/views/tasks_view.py" beforeDir="false" afterPath="$PROJECT_DIR$/views/tasks_view.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -16,6 +30,12 @@
     <persistenceIdMap>
       <entry key="_D:/diplom_srm" value="38oQJ2pr5s7ZP7k4isOGMGbRGC9" />
     </persistenceIdMap>
+  </component>
+  <component name="CopilotUserSelectedModel">
+    <selectedModels>
+      <entry key="chat-panel" value="Auto" />
+      <entry key="agent-panel" value="Auto" />
+    </selectedModels>
   </component>
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
@@ -60,12 +80,15 @@
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;Notification.DisplayName-DoNotAsk-git.push.result&quot;: &quot;&quot;,
     &quot;Notification.DoNotAsk-git.push.result&quot;: &quot;true&quot;,
+    &quot;Python tests.Python tests in test_client_card.py.executor&quot;: &quot;Run&quot;,
     &quot;Python.Restore_and_migrate.executor&quot;: &quot;Run&quot;,
     &quot;Python.__init__.executor&quot;: &quot;Run&quot;,
+    &quot;Python.add_missing_columns.executor&quot;: &quot;Run&quot;,
     &quot;Python.app.executor&quot;: &quot;Run&quot;,
     &quot;Python.client.executor&quot;: &quot;Run&quot;,
     &quot;Python.clients_manager.executor&quot;: &quot;Run&quot;,
     &quot;Python.clients_view.executor&quot;: &quot;Run&quot;,
+    &quot;Python.contact_person.executor&quot;: &quot;Run&quot;,
     &quot;Python.contracts_manager.executor&quot;: &quot;Run&quot;,
     &quot;Python.create_structure.executor&quot;: &quot;Run&quot;,
     &quot;Python.database.executor&quot;: &quot;Run&quot;,
@@ -74,17 +97,24 @@
     &quot;Python.main.executor&quot;: &quot;Run&quot;,
     &quot;Python.migrate_database.executor&quot;: &quot;Run&quot;,
     &quot;Python.migrate_emails.executor&quot;: &quot;Run&quot;,
+    &quot;Python.searchable_combobox.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_confirmation.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_database.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_phase3.executor&quot;: &quot;Run&quot;,
     &quot;Python.test_task_dialog.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
     &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;com.github.copilot.settings.customization.CustomizationConfigurable&quot;
+    &quot;settings.editor.selected.configurable&quot;: &quot;terminal&quot;
   }
 }</component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="D:\diplom_srm" />
+    </key>
+  </component>
   <component name="RunManager">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="diplom_srm" />
@@ -99,6 +129,7 @@
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
@@ -117,7 +148,7 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-python-sdk-7e47963ff851-f0eec537fc84-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.23892.515" />
+        <option value="bundled-python-sdk-2653e85de345-6d6dccd035ac-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.31033.139" />
       </set>
     </attachedChunks>
   </component>

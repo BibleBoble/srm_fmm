@@ -65,3 +65,27 @@ class ContactPerson:
         if not self.full_name or len(self.full_name.strip()) < 2:
             return False
         return True
+
+    def validate_full_name(self, name: str) -> tuple:
+        """
+        Валидация ФИО контактного лица
+
+        Returns:
+            (is_valid: bool, error_message: str)
+        """
+        name = name.strip() if isinstance(name, str) else ""
+
+        if not name:
+            return False, "ФИО контактного лица обязательно"
+        if len(name) < 2:
+            return False, "ФИО должно содержать минимум 2 символа"
+        if len(name) > 200:
+            return False, "ФИО слишком длинное (макс 200 символов)"
+
+        return True, ""
+
+    def is_valid_for_save(self) -> bool:
+        """Полная валидация перед сохранением"""
+        is_ok, _ = self.validate_full_name(self.full_name)
+        return is_ok
+
