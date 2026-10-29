@@ -9,142 +9,100 @@ from tkinter import messagebox
 
 
 class MailWindowController:
-    """Встраивает отдельный процесс WebView2 в постоянный Tk-контейнер."""
+    """Запускает отдельный Qt WebEngine и управляет его дочерним HWND."""
 
     MIN_HOST_WIDTH = 100
     MIN_HOST_HEIGHT = 100
+    STARTUP_TIMEOUT = 45
+    NAVIGATION_TIMEOUT = 60
 
     def __init__(self, root, host_frame):
         self.root = root
         self.host_frame = host_frame
         self.process = None
         self._closing = False
+        self._visible = False
+        self._host_mapped = True
         self._output_queue = queue.Queue()
-        self._reader_done = threading.Event()
+        self._startup_deadline = None
+        self._navigation_deadline = None
         self._startup_complete = False
         self._page_loaded = False
-        self._visible = False
-        self._navigation_deadline = None
+        self._error_reported = False
         self._poll_job = None
         self._resize_job = None
         self._start_job = None
+        self._show_job = None
         self._start_deadline = None
         self.host_frame.bind("<Configure>", self._on_host_resize, add="+")
         self.root.bind("<Map>", self._on_root_mapped, add="+")
 
     def show(self):
-        """Запускает WebView2 либо возвращает в область раздела готовое окно."""
+        """Показывает встроенный браузер либо запускает его."""
         if self._closing:
             return
 
         self._visible = True
+        self._show_host()
+        self.host_frame.tkraise()
         self.host_frame.update_idletasks()
-        if self.process is not None and self.process.poll() is None:
-            self._send_command("show")
+        if self._is_running():
+            if self._show_job is not None:
+                self.root.after_cancel(self._show_job)
+            self._show_job = self.root.after_idle(self._show_browser)
             return
 
         self._start_when_sized()
 
-    def start_background(self):
-        """Запускает почтовый WebView при старте приложения, не выбирая раздел."""
-        if self._closing:
+    def _show_browser(self):
+        self._show_job = None
+        if not self._visible or not self._is_running():
             return
-        if self.process is not None and self.process.poll() is None:
+        self.host_frame.update_idletasks()
+        width, height = self._host_size()
+        self._send_command(f"resize {width} {height}")
+        self._send_command("show")
+
+    def start_background(self):
+        """Запускает WebView при старте приложения, не открывая вкладку."""
+        if self._closing or self._is_running():
             return
         self.host_frame.update_idletasks()
         self._start_when_sized()
 
     def hide(self):
-        """Оставляет WebView2 под другим разделом, сохраняя его поверхность."""
-        # Tk перекрывает mail_host другим разделом; прятать HWND WebView нельзя,
-        # иначе WebView2 может потерять поверхность при следующем отображении.
+        """Скрывает HWND браузера перед показом другого раздела."""
         self._visible = False
+        if self._show_job is not None:
+            self.root.after_cancel(self._show_job)
+            self._show_job = None
+        self._send_command("hide")
+        self._hide_host()
 
-    def _start_process(self):
-        if self._closing:
-            return
-        if self.process is not None and self.process.poll() is None:
-            return
+    def _show_host(self):
+        if not self._host_mapped:
+            self.host_frame.grid()
+            self._host_mapped = True
 
-        while True:
-            try:
-                self._output_queue.get_nowait()
-            except queue.Empty:
-                break
+    def _hide_host(self):
+        if self._host_mapped and self._is_running():
+            self.host_frame.grid_remove()
+            self._host_mapped = False
 
-        project_root = Path(__file__).resolve().parent.parent
-        project_interpreter = project_root / ".venv" / "Scripts" / "python.exe"
-        interpreter = (
-            str(project_interpreter)
-            if project_interpreter.is_file()
-            else sys.executable
+    def _is_running(self):
+        return self.process is not None and self.process.poll() is None
+
+    def _host_size(self):
+        return (
+            max(self.host_frame.winfo_width(), 1),
+            max(self.host_frame.winfo_height(), 1)
         )
-        width = max(self.host_frame.winfo_width(), 1)
-        height = max(self.host_frame.winfo_height(), 1)
-        command = [
-            interpreter,
-            "-X",
-            "utf8",
-            "-m",
-            "views.mail_webview",
-            str(self.host_frame.winfo_id()),
-            str(width),
-            str(height)
-        ]
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
-        try:
-            self.process = subprocess.Popen(
-                command,
-                cwd=str(project_root),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                creationflags=creation_flags
-            )
-        except OSError as error:
-            self._show_error(f"Не удалось запустить окно почты:\n{error}")
-            return
-
-        self._reader_done = threading.Event()
-        self._startup_complete = False
-        self._page_loaded = False
-        self._navigation_deadline = None
-        threading.Thread(
-            target=self._read_process_output,
-            args=(self.process, self._reader_done),
-            daemon=True
-        ).start()
-        self._poll_job = self.root.after(100, self._drain_process_output)
-        if self._visible:
-            self._send_command("show")
-
-    def _on_root_mapped(self, event):
-        if event.widget is self.root and self._visible:
-            self.root.after_idle(self._refresh_after_restore)
-
-    def _refresh_after_restore(self):
-        if (
-            self._visible
-            and self.process is not None
-            and self.process.poll() is None
-        ):
-            self._send_command("refresh")
 
     def _start_when_sized(self):
-        """Waits for Tk to lay out the host before creating the native browser."""
-        if self._closing:
-            return
-        if self._start_job is not None:
+        if self._closing or self._start_job is not None:
             return
 
-        self.host_frame.update_idletasks()
-        width = self.host_frame.winfo_width()
-        height = self.host_frame.winfo_height()
+        width, height = self._host_size()
         if width >= self.MIN_HOST_WIDTH and height >= self.MIN_HOST_HEIGHT:
             self._start_deadline = None
             self._start_process()
@@ -166,9 +124,73 @@ class MailWindowController:
         self._start_job = None
         self._start_when_sized()
 
+    def _start_process(self):
+        if self._closing or self._is_running():
+            return
+
+        while True:
+            try:
+                self._output_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        project_root = Path(__file__).resolve().parent.parent
+        project_interpreter = project_root / ".venv" / "Scripts" / "python.exe"
+        interpreter = (
+            str(project_interpreter)
+            if project_interpreter.is_file()
+            else sys.executable
+        )
+        width, height = self._host_size()
+        command = [
+            interpreter,
+            "-X",
+            "utf8",
+            "-m",
+            "views.mail_webview",
+            str(self.host_frame.winfo_id()),
+            str(width),
+            str(height)
+        ]
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                cwd=str(project_root),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            )
+        except OSError as error:
+            self.process = None
+            self._show_error(f"Не удалось запустить окно почты:\n{error}")
+            return
+
+        self._startup_complete = False
+        self._page_loaded = False
+        self._error_reported = False
+        self._startup_deadline = time.monotonic() + self.STARTUP_TIMEOUT
+        self._navigation_deadline = None
+        threading.Thread(
+            target=self._read_process_output,
+            args=(self.process,),
+            daemon=True
+        ).start()
+        self._poll_job = self.root.after(100, self._drain_process_output)
+
+        if self._visible:
+            self._show_browser()
+        else:
+            self._hide_host()
+
     def _send_command(self, command):
         process = self.process
-        if process is None or process.poll() is not None or process.stdin is None:
+        if not self._is_running() or process.stdin is None:
             return
         try:
             process.stdin.write(f"{command}\n")
@@ -182,13 +204,15 @@ class MailWindowController:
             or event.height < self.MIN_HOST_HEIGHT
         ):
             return
-        if self.process is None or self.process.poll() is not None:
+
+        if not self._is_running():
             if self._start_job is not None:
                 self.root.after_cancel(self._start_job)
                 self._start_job = None
             self._start_deadline = None
             self._start_process()
             return
+
         if self._resize_job is not None:
             self.root.after_cancel(self._resize_job)
         self._resize_job = self.root.after(
@@ -203,17 +227,27 @@ class MailWindowController:
         self._resize_job = None
         self._send_command(f"resize {width} {height}")
 
-    def _read_process_output(self, process, reader_done):
-        try:
-            if process.stdout is not None:
-                for line in process.stdout:
-                    message = line.strip()
-                    if message in {"READY", "PYWEBVIEW_READY"} or message.startswith(
-                        ("ERROR:", "NAVIGATION_COMPLETED:", "NAVIGATION_FAILED:")
-                    ) or "WebView2 initialization failed" in message:
-                        self._output_queue.put(message)
-        finally:
-            reader_done.set()
+    def _on_root_mapped(self, event):
+        if event.widget is self.root and self._visible:
+            self.root.after_idle(self._refresh_after_restore)
+
+    def _refresh_after_restore(self):
+        if not self._visible or not self._is_running():
+            return
+        self._show_host()
+        self.host_frame.tkraise()
+        self.host_frame.update_idletasks()
+        self._show_browser()
+
+    def _read_process_output(self, process):
+        if process.stdout is None:
+            return
+        for line in process.stdout:
+            message = line.strip()
+            if message == "READY" or message.startswith(
+                ("ERROR:", "NAVIGATION_COMPLETED:", "NAVIGATION_FAILED:")
+            ):
+                self._output_queue.put(message)
 
     def _drain_process_output(self):
         self._poll_job = None
@@ -227,59 +261,93 @@ class MailWindowController:
                 break
 
             if message.startswith("ERROR:"):
-                detail = message.removeprefix("ERROR:").strip()
+                self._error_reported = True
+                self._startup_complete = True
+                self._page_loaded = True
                 self._show_error(
-                    "Не удалось встроить Яндекс.Почту.\n\n"
-                    f"{detail}\n\n"
-                    "Проверьте установку pywebview и Microsoft Edge WebView2 Runtime."
+                    "Не удалось запустить встроенную Яндекс.Почту.\n\n"
+                    f"{message.removeprefix('ERROR:').strip()}"
                 )
                 self._send_command("quit")
-            elif message in {"READY", "PYWEBVIEW_READY"}:
+            elif message == "READY":
                 self._startup_complete = True
+                self._startup_deadline = None
             elif message.startswith("NAVIGATION_COMPLETED:"):
                 self._page_loaded = True
+                self._navigation_deadline = None
             elif message.startswith("NAVIGATION_FAILED:"):
                 self._page_loaded = True
+                self._navigation_deadline = None
                 self._show_error(
-                    "Яндекс.Почта не загрузилась в WebView2.\n\n"
+                    "Яндекс.Почта не загрузилась.\n\n"
                     f"{message.removeprefix('NAVIGATION_FAILED:').strip()}"
                 )
-            elif "WebView2 initialization failed" in message:
-                self._show_error(
-                    "Microsoft Edge WebView2 не смог загрузить почту.\n\n"
-                    f"{message}"
-                )
 
-        process_is_running = self.process is not None and self.process.poll() is None
-        if not self._startup_complete and (
-            process_is_running or not self._reader_done.is_set()
-        ):
-            self._poll_job = self.root.after(100, self._drain_process_output)
-        elif process_is_running and not self._page_loaded:
+        if self._is_running() and not self._startup_complete:
+            if (
+                self._startup_deadline is not None
+                and time.monotonic() >= self._startup_deadline
+                and not self._error_reported
+            ):
+                self._error_reported = True
+                self._show_error(
+                    "Qt WebEngine не запустился за отведённое время. "
+                    "Проверьте установку зависимостей проекта."
+                )
+                self._send_command("quit")
+            self._poll_job = self.root.after(250, self._drain_process_output)
+            return
+
+        if self._is_running() and not self._page_loaded:
+            if not self._visible:
+                self._poll_job = self.root.after(
+                    1000,
+                    self._drain_process_output
+                )
+                return
             if self._navigation_deadline is None:
-                self._navigation_deadline = time.monotonic() + 45
-            if time.monotonic() >= self._navigation_deadline:
+                self._navigation_deadline = (
+                    time.monotonic() + self.NAVIGATION_TIMEOUT
+                )
+            elif (
+                time.monotonic() >= self._navigation_deadline
+                and not self._error_reported
+            ):
+                self._error_reported = True
                 self._page_loaded = True
                 self._show_error(
-                    "WebView2 создан, но сайт почты не сообщил о завершении загрузки. "
-                    "Проверьте доступ к Интернету, прокси и Edge WebView2 Runtime."
+                    "Яндекс.Почта не завершила загрузку. "
+                    "Проверьте подключение к Интернету."
                 )
-            else:
-                self._poll_job = self.root.after(1000, self._drain_process_output)
+            self._poll_job = self.root.after(1000, self._drain_process_output)
+            return
+
+        if not self._is_running() and not self._error_reported:
+            self._error_reported = True
+            self._show_error(
+                "Процесс встроенной почты завершился. "
+                "Перезапустите приложение и попробуйте снова."
+            )
 
     def _show_error(self, message):
         if not self._closing:
             messagebox.showerror("Почта", message, parent=self.root)
 
     def close(self):
-        """Завершает процесс WebView2 перед закрытием приложения."""
+        """Корректно завершает почтовый процесс перед закрытием приложения."""
         self._closing = True
-        for job in (self._poll_job, self._resize_job, self._start_job):
+        for job in (
+            self._poll_job,
+            self._resize_job,
+            self._start_job,
+            self._show_job
+        ):
             if job is not None:
                 self.root.after_cancel(job)
         self._poll_job = None
         self._resize_job = None
         self._start_job = None
+        self._show_job = None
 
         process = self.process
         if process is None or process.poll() is not None:

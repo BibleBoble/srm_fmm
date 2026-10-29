@@ -2,9 +2,12 @@
   "words": [
     "borderwidth",
     "bootstrapper",
+    "casefold",
     "clipchildren",
     "clipsiblings",
     "creationflags",
+    "dispatch",
+    "dispatchex",
     "edgechromium",
     "evenrow",
     "fieldbackground",
@@ -16,10 +19,14 @@
     "maximizebox",
     "minimizebox",
     "nozorder",
+    "noactivate",
     "oddrow",
+    "automationsecurity",
+    "highlightcolorindex",
     "padx",
     "pady",
     "pywebview",
+    "pywin32",
     "redrawwindow",
     "relx",
     "rowheight",
@@ -31,6 +38,8 @@
     "sysmenu",
     "textvariable",
     "thickframe",
+    "shownoactivate",
+    "win32com",
     "yscrollcommand"
   ]
 }

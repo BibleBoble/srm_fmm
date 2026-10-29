@@ -5,6 +5,7 @@ Singleton класс для работы с базой данных
 """
 import sqlite3
 import logging
+import re
 from pathlib import Path
 from threading import Lock
 from typing import Optional, List, Dict, Any, Tuple
@@ -13,6 +14,70 @@ from typing import Optional, List, Dict, Any, Tuple
 class DatabaseError(Exception):
     """Базовое исключение для ошибок БД"""
     pass
+
+
+def _casefold_sql_value(value: Any) -> str:
+    """Нормализует текст для Unicode-поиска в SQLite."""
+    return "" if value is None else str(value).casefold()
+
+
+def _one_edit_apart(first: str, second: str) -> bool:
+    """Проверяет, отличаются ли слова не более чем одной опечаткой."""
+    if abs(len(first) - len(second)) > 1:
+        return False
+
+    if len(first) == len(second):
+        mismatches = [
+            index
+            for index, (left, right) in enumerate(zip(first, second))
+            if left != right
+        ]
+        if len(mismatches) <= 1:
+            return True
+        return (
+            len(mismatches) == 2
+            and mismatches[1] == mismatches[0] + 1
+            and first[mismatches[0]] == second[mismatches[1]]
+            and first[mismatches[1]] == second[mismatches[0]]
+        )
+
+    longer, shorter = (
+        (first, second) if len(first) > len(second) else (second, first)
+    )
+    long_index = short_index = edits = 0
+    while long_index < len(longer) and short_index < len(shorter):
+        if longer[long_index] == shorter[short_index]:
+            long_index += 1
+            short_index += 1
+            continue
+        edits += 1
+        long_index += 1
+        if edits > 1:
+            return False
+    return True
+
+
+def _fuzzy_contains(value: Any, query: Any) -> int:
+    """Ищет подстроку и допускает одну опечатку в отдельном слове."""
+    text = _casefold_sql_value(value)
+    token = _casefold_sql_value(query).strip()
+    if not token:
+        return 0
+    if token in text:
+        return 1
+    if len(token) < 4:
+        return 0
+
+    lengths = {len(token) - 1, len(token), len(token) + 1}
+    for word in re.findall(r"\w+", text):
+        for candidate_length in lengths:
+            if candidate_length <= 0 or candidate_length > len(word):
+                continue
+            for start in range(len(word) - candidate_length + 1):
+                candidate = word[start:start + candidate_length]
+                if _one_edit_apart(token, candidate):
+                    return 1
+    return 0
 
 
 class Database:
@@ -91,6 +156,18 @@ class Database:
             
             # Включаем доступ к столбцам по именам
             self._connection.row_factory = sqlite3.Row
+            self._connection.create_function(
+                "CASEFOLD",
+                1,
+                _casefold_sql_value,
+                deterministic=True
+            )
+            self._connection.create_function(
+                "FUZZY_CONTAINS",
+                2,
+                _fuzzy_contains,
+                deterministic=True
+            )
             
             # Включаем внешние ключи (для связей между таблицами)
             self._connection.execute("PRAGMA foreign_keys = ON")

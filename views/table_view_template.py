@@ -50,6 +50,10 @@ class TableViewTemplate(BaseView):
 
         self.search_var = tk.StringVar()
         self.search_job = None
+        self._search_trace_id = self.search_var.trace_add(
+            "write",
+            self._on_search_change
+        )
         self.current_page = 1
         self.total_items = 0
         self.sort_var = tk.StringVar(value="")
@@ -156,9 +160,6 @@ class TableViewTemplate(BaseView):
             activeforeground=TableView.BUTTON_FG
         )
         self.add_button.pack(side=tk.RIGHT, padx=Sizes.TOP_PANEL_PADDING_X, pady=Sizes.TOP_PANEL_PADDING_Y)
-
-        # Привязка поиска
-        self.search_var.trace_add('write', self._on_search_change)
 
         # 2. Используем grid для точного контроля расположения
         self.parent_frame.grid_rowconfigure(1, weight=1)  # Таблица растягивается

@@ -4,9 +4,11 @@
 Отвечает только за UI формы и валидацию полей
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from pathlib import Path
+from tkinter import ttk, messagebox, filedialog
 from utils.helpers import show_message
 from utils.ui_helpers import center_toplevel
+from utils.partner_card_reader import read_partner_card
 
 
 class ClientFormDialog:
@@ -37,6 +39,7 @@ class ClientFormDialog:
         self.client_data = client_data or {}
         self.dialog = None
         self.contact_widgets = []
+        self.partner_field_widgets = {}
         self.saved_client_id = None  # ID сохранённого клиента
         
     def show(self):
@@ -75,6 +78,20 @@ class ClientFormDialog:
         
     def _create_content(self):
         """Создать содержимое формы"""
+        import_bar = tk.Frame(self.dialog, bg="white")
+        import_bar.pack(fill=tk.X, padx=20, pady=(10, 0))
+        tk.Button(
+            import_bar,
+            text="Загрузить карточку клиента (Word)",
+            command=self._import_partner_card,
+            bg="#0f766e",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            padx=12,
+            pady=6
+        ).pack(side=tk.LEFT)
+
         # Canvas для прокрутки
         canvas_container = tk.Frame(self.dialog, bg='white')
         canvas_container.pack(fill=tk.BOTH, expand=True)
@@ -108,6 +125,7 @@ class ClientFormDialog:
         canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
         
         self._create_main_info_section()
+        self._create_partner_section()
         self._create_contacts_section()
         
     def _create_main_info_section(self):
@@ -145,6 +163,136 @@ class ClientFormDialog:
             notes = self.client_data.get('notes', '')
             if notes:
                 self.notes_text.insert('1.0', notes)
+
+    def _create_partner_section(self):
+        """Добавить реквизиты партнёра и импорт из файла Word."""
+        section = tk.LabelFrame(
+            self.scrollable_content,
+            text="Карточка партнёра",
+            font=("Arial", 12, "bold"),
+            bg="white",
+            fg="#333",
+            padx=12,
+            pady=10
+        )
+        section.pack(fill=tk.X, padx=20, pady=(0, 18))
+        section.columnconfigure(1, weight=1)
+
+        fields = (
+            ("full_legal_name", "Полное юридическое наименование"),
+            ("legal_address", "Юридический адрес"),
+            ("postal_address", "Почтовый адрес"),
+            ("ogrn", "ОГРН"),
+            ("inn_kpp", "ИНН/КПП"),
+            ("responsible_person", "Ответственное лицо"),
+            ("partner_email", "E-mail"),
+            ("partner_phone", "Телефон")
+        )
+        for row, (key, label) in enumerate(fields, start=1):
+            tk.Label(
+                section,
+                text=label,
+                font=("Arial", 9),
+                bg="white",
+                anchor="w"
+            ).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
+            entry = tk.Entry(section, font=("Arial", 10), relief="solid", borderwidth=1)
+            entry.grid(row=row, column=1, sticky="ew", pady=3, ipady=2)
+            self.partner_field_widgets[key] = entry
+            entry.insert(0, str(self.client_data.get(key) or ""))
+
+        bank_row = len(fields) + 1
+        tk.Label(
+            section,
+            text="Банковские реквизиты",
+            font=("Arial", 9),
+            bg="white",
+            anchor="nw"
+        ).grid(row=bank_row, column=0, sticky="nw", padx=(0, 10), pady=3)
+        bank_text = tk.Text(
+            section,
+            height=4,
+            font=("Arial", 10),
+            relief="solid",
+            borderwidth=1,
+            wrap=tk.WORD
+        )
+        bank_text.grid(row=bank_row, column=1, sticky="ew", pady=3)
+        bank_text.insert("1.0", str(self.client_data.get("bank_details") or ""))
+        self.partner_field_widgets["bank_details"] = bank_text
+
+    def _import_partner_card(self):
+        """Выбрать карточку клиента и заполнить распознанные реквизиты."""
+        downloads_dir = Path.home() / "Downloads"
+        if not downloads_dir.is_dir():
+            downloads_dir = Path.home()
+        selected_path = filedialog.askopenfilename(
+            parent=self.dialog,
+            title="Выберите карточку клиента",
+            initialdir=str(downloads_dir),
+            filetypes=(
+                ("Документы Word", "*.docx *.doc"),
+                ("Документ Word DOCX", "*.docx"),
+                ("Документ Word DOC", "*.doc"),
+                ("Все файлы", "*.*")
+            )
+        )
+        if not selected_path:
+            return
+
+        try:
+            partner_data = read_partner_card(Path(selected_path))
+        except (OSError, RuntimeError, ValueError) as error:
+            messagebox.showerror(
+                "Импорт карточки партнёра",
+                str(error),
+                parent=self.dialog
+            )
+            return
+
+        if partner_data.get("company"):
+            self.company_entry.delete(0, tk.END)
+            self.company_entry.insert(0, partner_data["company"])
+        if partner_data.get("legal_address"):
+            self.address_entry.delete(0, tk.END)
+            self.address_entry.insert(0, partner_data["legal_address"])
+
+        for key, widget in self.partner_field_widgets.items():
+            value = partner_data.get(key)
+            if not value:
+                continue
+            if isinstance(widget, tk.Text):
+                widget.delete("1.0", tk.END)
+                widget.insert("1.0", value)
+            else:
+                widget.delete(0, tk.END)
+                widget.insert(0, value)
+
+        responsible_person = partner_data.get("responsible_person")
+        if responsible_person:
+            if not self.contact_widgets:
+                self._add_contact_field()
+            contact = self.contact_widgets[0]
+            contact["name"].delete(0, tk.END)
+            contact["name"].insert(0, responsible_person)
+            contact["position"].delete(0, tk.END)
+            contact["position"].insert(
+                0,
+                partner_data.get("responsible_position")
+                or "Директор"
+            )
+            if partner_data.get("partner_email"):
+                contact["email"].delete(0, tk.END)
+                contact["email"].insert(0, partner_data["partner_email"])
+            if partner_data.get("partner_phone"):
+                contact["phone"].delete(0, tk.END)
+                contact["phone"].insert(0, partner_data["partner_phone"])
+
+        messagebox.showinfo(
+            "Импорт карточки партнёра",
+            f"Считано полей: {len(partner_data)}.",
+            parent=self.dialog
+        )
                 
     def _create_contacts_section(self):
         """Секция контактных лиц"""
@@ -375,7 +523,16 @@ class ClientFormDialog:
             'company': company,
             'address': self.address_entry.get().strip(),
             'notes': self.notes_text.get('1.0', tk.END).strip(),
-            'contacts': contacts
+            'contacts': contacts,
+            'full_legal_name': self.partner_field_widgets["full_legal_name"].get().strip(),
+            'legal_address': self.partner_field_widgets["legal_address"].get().strip(),
+            'postal_address': self.partner_field_widgets["postal_address"].get().strip(),
+            'ogrn': self.partner_field_widgets["ogrn"].get().strip(),
+            'inn_kpp': self.partner_field_widgets["inn_kpp"].get().strip(),
+            'responsible_person': self.partner_field_widgets["responsible_person"].get().strip(),
+            'partner_email': self.partner_field_widgets["partner_email"].get().strip(),
+            'partner_phone': self.partner_field_widgets["partner_phone"].get().strip(),
+            'bank_details': self.partner_field_widgets["bank_details"].get("1.0", "end-1c").strip()
         }
         
         try:

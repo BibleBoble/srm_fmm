@@ -327,15 +327,33 @@ class ExpertsManager:
         where = []
 
         if search:
-            term = f"%{search.lower()}%"
-            where.append("""
-                LOWER(e.name) LIKE ? OR
-                EXISTS (SELECT 1 FROM expert_contacts ec WHERE ec.expert_id = e.id AND (LOWER(ec.full_name) LIKE ? OR LOWER(ec.phone) LIKE ? OR LOWER(ec.email) LIKE ?)) OR
-                EXISTS (SELECT 1 FROM expert_specializations es WHERE es.expert_id = e.id AND LOWER(es.specialization) LIKE ?)
-            """)
-            params.extend([term] * 5)  # Расширен для контактов (full_name, phone, email) + специальности
+            tokens = [
+                token.casefold()
+                for token in str(search).split()
+                if token.strip()
+            ]
+            for token in tokens:
+                where.append("""
+                    (
+                        FUZZY_CONTAINS(e.name, ?) = 1 OR
+                        EXISTS (
+                            SELECT 1 FROM expert_contacts ec
+                            WHERE ec.expert_id = e.id AND (
+                                FUZZY_CONTAINS(ec.full_name, ?) = 1 OR
+                                FUZZY_CONTAINS(ec.phone, ?) = 1 OR
+                                FUZZY_CONTAINS(ec.email, ?) = 1
+                            )
+                        ) OR
+                        EXISTS (
+                            SELECT 1 FROM expert_specializations es
+                            WHERE es.expert_id = e.id
+                              AND FUZZY_CONTAINS(es.specialization, ?) = 1
+                        )
+                    )
+                """)
+                params.extend([token] * 5)
 
-        where_sql = "WHERE " + " OR ".join(where) if where else ""
+        where_sql = "WHERE " + " AND ".join(where) if where else ""
         params_for_count = params.copy()
 
         order_by = "ORDER BY e.name ASC"

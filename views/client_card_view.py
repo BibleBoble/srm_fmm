@@ -9,8 +9,13 @@ import os
 from pathlib import Path
 import re
 from datetime import date
+from decimal import Decimal
 from zipfile import ZIP_DEFLATED, ZipFile
-from utils.ui_helpers import center_toplevel, confirm_close_on_focus_loss
+from views.document_generation_dialog import show_document_input_dialog
+from utils.python_document_generator import PythonDocumentGenerator
+from utils.money_to_words import amount_to_russian_words
+from utils.specification_reader import read_specification_summary
+from utils.ui_helpers import center_toplevel
 from utils.constants import Colors
 from utils.date_utils import parse_ddmmyyyy
 
@@ -58,6 +63,9 @@ class ClientCardView:
         self.documents_dir = None
         self.document_paths = {}
         self.document_directories = {}
+        self.works_tree = None
+        self.works_status = None
+        self.work_directories = {}
         self.create_documents_button = None
         self.document_create_menu = None
         
@@ -80,7 +88,6 @@ class ClientCardView:
         self.card_window.configure(bg=Colors.LIGHT)
         
         self.card_window.protocol("WM_DELETE_WINDOW", self._on_close_click)
-        confirm_close_on_focus_loss(self.card_window, self._on_close_click)
         
         self._create_header(client)
         self._create_tabs(client)
@@ -129,9 +136,19 @@ class ClientCardView:
         notebook.add(tab_tasks, text="📌 Активность")
         self._create_tasks_tab(tab_tasks)
 
+        tab_works = tk.Frame(notebook, bg='white')
+        notebook.add(tab_works, text="✅ Выполненные работы")
+        self._create_completed_works_tab(tab_works)
+
         tab_documents = tk.Frame(notebook, bg='white')
         notebook.add(tab_documents, text="📁 Документы")
         self._create_documents_tab(tab_documents, client)
+        notebook.bind(
+            "<<NotebookTabChanged>>",
+            lambda event: self._refresh_completed_works()
+            if notebook.select() == str(tab_works)
+            else None
+        )
         notebook.select(tab_tasks)
         
     def _create_main_tab(self, parent, client):
@@ -452,6 +469,202 @@ class ClientCardView:
             return self.card_window
         raise RuntimeError("Окно карточки клиента уже закрыто.")
 
+    def _create_completed_works_tab(self, parent):
+        """Show one work row for every saved specification."""
+        toolbar = tk.Frame(parent, bg="white")
+        toolbar.pack(fill=tk.X, padx=16, pady=(14, 8))
+        tk.Label(
+            toolbar,
+            text="Работы по спецификациям",
+            font=("Arial", 14, "bold"),
+            bg="white",
+            fg="#243247"
+        ).pack(side=tk.LEFT)
+        tk.Button(
+            toolbar,
+            text="Обновить",
+            command=self._refresh_completed_works,
+            bg="#0f766e",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            padx=12,
+            pady=6
+        ).pack(side=tk.RIGHT)
+
+        table_frame = tk.Frame(parent, bg="white")
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 4))
+        self.works_tree = ttk.Treeview(
+            table_frame,
+            columns=("number", "name", "cost", "status"),
+            show="headings",
+            selectmode="browse"
+        )
+        for column, heading in (
+            ("number", "Номер работы"),
+            ("name", "Наименование"),
+            ("cost", "Стоимость, руб."),
+            ("status", "Статус")
+        ):
+            self.works_tree.heading(column, text=heading)
+        self.works_tree.column("number", width=120, anchor="center", stretch=False)
+        self.works_tree.column("name", width=480, anchor="w")
+        self.works_tree.column("cost", width=150, anchor="e", stretch=False)
+        self.works_tree.column("status", width=130, anchor="center", stretch=False)
+        scrollbar = ttk.Scrollbar(
+            table_frame,
+            orient="vertical",
+            command=self.works_tree.yview
+        )
+        self.works_tree.configure(yscrollcommand=scrollbar.set)
+        self.works_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.works_tree.tag_configure(
+            "launched",
+            background="#fff7d6",
+            foreground="#8a5a00"
+        )
+        self.works_tree.tag_configure(
+            "completed",
+            background="#e4f5e9",
+            foreground="#176b35"
+        )
+        self.works_tree.tag_configure(
+            "unreadable",
+            background="#fde8e7",
+            foreground="#a12622"
+        )
+        self.works_tree.bind("<Double-1>", self._open_work_folder)
+
+        self.works_status = tk.Label(
+            parent,
+            text="",
+            font=("Arial", 9),
+            bg="white",
+            fg="#64748b",
+            anchor="w"
+        )
+        self.works_status.pack(fill=tk.X, padx=16, pady=(0, 12))
+        self._refresh_completed_works()
+
+    def _refresh_completed_works(self):
+        """Rebuild the work list from specification folders and their acts."""
+        if not self.works_tree:
+            return
+
+        for item in self.works_tree.get_children():
+            self.works_tree.delete(item)
+        self.work_directories.clear()
+
+        client_dir = self._find_client_documents_dir(self.client_data)
+        specifications_dir = client_dir / "спецификации" if client_dir else None
+        if specifications_dir is None or not specifications_dir.is_dir():
+            self.works_status.config(text="Спецификации клиента не найдены.")
+            return
+
+        folder_pattern = re.compile(r"спецификация\s+(\d+)", re.IGNORECASE)
+        specification_folders = []
+        unreadable_count = 0
+        try:
+            for path in specifications_dir.iterdir():
+                match = folder_pattern.fullmatch(path.name)
+                if path.is_dir() and not path.is_symlink() and match:
+                    specification_folders.append((int(match.group(1)), path))
+        except OSError as error:
+            self.works_status.config(text="Не удалось прочитать папки спецификаций.")
+            messagebox.showerror(
+                "Работы клиента",
+                f"Не удалось загрузить список работ:\n{error}",
+                parent=self.card_window
+            )
+            return
+
+        item_index = 0
+        for number, folder in sorted(specification_folders):
+            try:
+                document_pattern = re.compile(
+                    rf"^спецификация\s*(?:№\s*)?{number}(?:\b|$)",
+                    re.IGNORECASE
+                )
+                specification_files = sorted(
+                    (
+                        path for path in folder.iterdir()
+                        if path.is_file()
+                        and not path.is_symlink()
+                        and path.suffix.casefold() == ".docx"
+                        and not path.name.casefold().startswith("~$")
+                        and document_pattern.match(path.stem)
+                    ),
+                    key=lambda path: path.name.casefold()
+                )
+                if not specification_files:
+                    raise ValueError("Файл спецификации DOCX не найден.")
+
+                summary = read_specification_summary(specification_files[0])
+                service_name = "; ".join(summary.services)
+                cost = f"{summary.total:,.2f}".replace(",", " ").replace(".", ",")
+                unreadable = False
+            except (OSError, ValueError) as error:
+                service_name = "Не удалось прочитать спецификацию"
+                cost = "—"
+                unreadable = True
+                unreadable_count += 1
+                print(f"Не удалось прочитать спецификацию {folder}: {error}")
+
+            has_act = False
+            try:
+                has_act = any(
+                    path.is_file()
+                    and not path.is_symlink()
+                    and path.suffix.casefold() in {".docx", ".pdf"}
+                    and path.name.casefold().startswith("акт")
+                    and not path.name.casefold().startswith("~$")
+                    for path in folder.iterdir()
+                )
+                status = "Выполнена" if has_act else "Запущена"
+            except OSError as error:
+                unreadable = True
+                unreadable_count += 1
+                status = "Не определён"
+                print(f"Не удалось определить наличие акта в {folder}: {error}")
+            row_id = f"work_{item_index}"
+            item_index += 1
+            self.work_directories[row_id] = folder
+            self.works_tree.insert(
+                "",
+                "end",
+                iid=row_id,
+                values=(str(number), service_name, cost, status),
+                tags=(
+                    "unreadable" if unreadable
+                    else "completed" if has_act
+                    else "launched",
+                )
+            )
+
+        status_text = f"Найдено работ: {len(specification_folders)}"
+        if unreadable_count:
+            status_text += (
+                f" | Проблем с чтением спецификации/статуса: {unreadable_count}"
+            )
+        self.works_status.config(text=status_text)
+
+    def _open_work_folder(self, event):
+        """Открыть папку спецификации по двойному щелчку."""
+        row_id = self.works_tree.identify_row(event.y)
+        folder = self.work_directories.get(row_id)
+        if not folder:
+            return "break"
+        try:
+            os.startfile(str(folder))
+        except OSError as error:
+            messagebox.showerror(
+                "Работы клиента",
+                f"Не удалось открыть папку спецификации:\n{error}",
+                parent=self.card_window
+            )
+        return "break"
+
     def _create_documents_tab(self, parent, client):
         """Создать список документов, найденных в каталоге клиента."""
         toolbar = tk.Frame(parent, bg='white')
@@ -647,6 +860,7 @@ class ClientCardView:
     def _show_document_create_menu(self):
         """Показать действия создания документов клиента."""
         menu = tk.Menu(self.card_window, tearoff=False)
+        menu.add_command(label="Договор", command=self._create_contract)
         menu.add_command(label="Спецификацию", command=self._create_specification)
         menu.add_command(label="Акт", command=self._create_act)
         menu.add_separator()
@@ -793,54 +1007,6 @@ class ClientCardView:
                 file_path.unlink(missing_ok=True)
             raise
 
-    @staticmethod
-    def _create_pdf_placeholder(file_path, lines):
-        """Создаёт PDF-копию документа с кириллическим текстом-заглушкой."""
-        created = False
-        try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            from reportlab.pdfgen import canvas
-
-            windows_dir = Path(os.environ.get("WINDIR", r"C:\Windows"))
-            fonts_dir = windows_dir / "Fonts"
-            font_path = next(
-                (
-                    candidate for candidate in (
-                        fonts_dir / "arial.ttf",
-                        fonts_dir / "calibri.ttf",
-                        fonts_dir / "segoeui.ttf"
-                    )
-                    if candidate.is_file()
-                ),
-                None
-            )
-            if font_path is None:
-                raise FileNotFoundError(
-                    "Не найден шрифт Arial/Calibri/Segoe UI для PDF с кириллицей."
-                )
-
-            font_name = "SRMDocumentFont"
-            if font_name not in pdfmetrics.getRegisteredFontNames():
-                pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
-
-            with file_path.open("xb") as output:
-                created = True
-                pdf = canvas.Canvas(output, pagesize=A4)
-                pdf.setTitle(file_path.stem)
-                pdf.setFont(font_name, 11)
-                text = pdf.beginText(50, 790)
-                text.setFont(font_name, 11)
-                for line in lines:
-                    text.textLine(str(line))
-                pdf.drawText(text)
-                pdf.save()
-        except Exception:
-            if created:
-                file_path.unlink(missing_ok=True)
-            raise
-
     def _client_document_identity(self):
         """Возвращает безопасные идентификатор и название клиента для имени файла."""
         client_id = str(self.client_data.get("public_id") or self.client_id).strip()
@@ -851,54 +1017,563 @@ class ClientCardView:
         safe_id = re.sub(r'[<>:"/\\|?*]', "_", client_id).strip(" .")
         return safe_id, safe_company
 
-    def _create_document_pair(self, docx_path, pdf_path, pdf_lines):
-        """Создаёт DOCX и его PDF-копию, удаляя частичный результат при ошибке."""
-        if docx_path.exists() or pdf_path.exists():
-            raise FileExistsError("Файл спецификации или акта с таким именем уже существует.")
-        docx_created = False
+    @staticmethod
+    def _document_initials(full_name):
+        parts = str(full_name or "").split()
+        if len(parts) < 2:
+            return ""
+        patronymic_endings = ("ович", "евич", "ич", "овна", "евна", "ична")
+        surname_endings = (
+            "ов", "ев", "ёв", "ин", "ын", "ский", "цкий", "ая", "ова", "ева"
+        )
+        if len(parts) == 2:
+            first_is_surname = parts[0].casefold().endswith(surname_endings)
+            second_is_surname = parts[1].casefold().endswith(surname_endings)
+            if second_is_surname and not first_is_surname:
+                return f"{parts[1]} {parts[0][0]}."
+        if len(parts) >= 3 and parts[1].casefold().endswith(patronymic_endings):
+            surname, given_names = parts[-1], parts[:2]
+        elif len(parts) >= 3 and parts[2].casefold().endswith(patronymic_endings):
+            surname, given_names = parts[0], parts[1:3]
+        else:
+            surname, given_names = parts[0], parts[1:3]
+        initials = "".join(f"{part[0]}." for part in given_names if part)
+        return f"{surname} {initials}".strip()
+
+    @staticmethod
+    def _decline_masculine_name_part(value):
+        name = value.strip()
+        lowered = name.casefold()
+        irregular_forms = {"павел": "павла", "лев": "льва"}
+        if lowered in irregular_forms:
+            declined = irregular_forms[lowered]
+            return declined[0].upper() + declined[1:] if name[0].isupper() else declined
+        if lowered.endswith(("ский", "цкий", "ой")):
+            declined = name[:-2] + "ого"
+        elif lowered.endswith(("ов", "ев", "ёв", "ин", "ын", "ич")):
+            declined = name + "а"
+        elif lowered.endswith("ий"):
+            declined = name[:-2] + "ия"
+        elif lowered.endswith(("й", "ь")):
+            declined = name[:-1] + "я"
+        elif lowered.endswith("я"):
+            declined = name[:-1] + "и"
+        elif lowered.endswith("а"):
+            declined = name[:-1] + "ы"
+        elif lowered[-1:].isalpha():
+            declined = name + "а"
+        else:
+            return name
+        return declined
+
+    @classmethod
+    def _document_name_genitive(cls, full_name):
+        """Decline common Russian three-part names; allow the form to correct exceptions."""
+        parts = str(full_name or "").split()
+        if len(parts) < 3:
+            return str(full_name or "").strip()
+
+        patronymic_endings = ("ович", "евич", "ич")
+        if parts[1].casefold().endswith(patronymic_endings):
+            given_name, patronymic, surname = parts[:3]
+            return " ".join((
+                cls._decline_masculine_name_part(given_name),
+                cls._decline_masculine_name_part(patronymic),
+                cls._decline_masculine_name_part(surname)
+            ))
+        if parts[2].casefold().endswith(patronymic_endings):
+            surname, given_name, patronymic = parts[:3]
+            return " ".join((
+                cls._decline_masculine_name_part(given_name),
+                cls._decline_masculine_name_part(patronymic),
+                cls._decline_masculine_name_part(surname)
+            ))
+        return str(full_name).strip()
+
+    def _document_form_fields(self, document_type):
+        """Подготовить поля документа с реквизитами из карточки клиента."""
+        client = self.client_data
+        company = str(client.get("company") or "").strip()
+        responsible_person = str(
+            client.get("responsible_person")
+            or client.get("primary_contact")
+            or ""
+        ).strip()
+        responsible_position = str(
+            client.get("primary_position")
+            or client.get("responsible_position")
+            or ""
+        ).casefold()
+        common_fields = [
+            {
+                "key": "document_date",
+                "label": "Дата документа (ДД.ММ.ГГГГ)",
+                "value": date.today().strftime("%d.%m.%Y"),
+                "required": True
+            },
+            {
+                "key": "company",
+                "label": "Наименование компании",
+                "value": company,
+                "required": True
+            },
+            {
+                "key": "responsible_person",
+                "label": "Ответственное лицо",
+                "value": responsible_person,
+                "required": True
+            },
+            {
+                "key": "inn_kpp",
+                "label": "ИНН/КПП",
+                "value": str(client.get("inn_kpp") or "").strip(),
+                "required": True
+            },
+            {
+                "key": "legal_address",
+                "label": "Юридический адрес",
+                "value": str(client.get("legal_address") or client.get("address") or "").strip(),
+                "required": True
+            },
+            {
+                "key": "postal_address",
+                "label": "Почтовый адрес",
+                "value": str(client.get("postal_address") or client.get("legal_address") or "").strip(),
+                "required": False
+            },
+            {
+                "key": "email",
+                "label": "E-mail",
+                "value": str(client.get("partner_email") or "").strip(),
+                "required": False
+            },
+            {
+                "key": "phone",
+                "label": "Телефон",
+                "value": str(client.get("partner_phone") or "").strip(),
+                "required": False
+            },
+            {
+                "key": "signature_position",
+                "label": "Должность подписанта со стороны клиента",
+                "value": (
+                    "Генеральный директор"
+                    if "генеральн" in responsible_position
+                    else "Директор"
+                ),
+                "choices": ("Директор", "Генеральный директор"),
+                "required": True
+            },
+            {
+                "key": "signature_short_name",
+                "label": "Фамилия и инициалы подписанта",
+                "value": self._document_initials(responsible_person),
+                "required": True
+            }
+        ]
+        if document_type == "contract":
+            return [
+                common_fields[0],
+                {
+                    "key": "organization_name",
+                    "label": "Полное юридическое наименование",
+                    "value": str(client.get("full_legal_name") or company).strip(),
+                    "required": True
+                },
+                common_fields[1],
+                common_fields[2],
+                {
+                    "key": "position_genitive",
+                    "label": "Должность подписанта в родительном падеже",
+                    "value": "",
+                    "required": True
+                },
+                {
+                    "key": "person_genitive",
+                    "label": "ФИО подписанта в родительном падеже",
+                    "value": "",
+                    "required": True
+                },
+                common_fields[3],
+                common_fields[4],
+                common_fields[5],
+                common_fields[6],
+                common_fields[7],
+                common_fields[8],
+                common_fields[9],
+                {
+                    "key": "bank_details",
+                    "label": "Банковские реквизиты",
+                    "value": str(client.get("bank_details") or "").strip(),
+                    "required": True,
+                    "multiline": True
+                }
+            ]
+
+        document_fields = list(common_fields)
+        if document_type == "specification":
+            document_fields.insert(1, {
+                "key": "contract_date",
+                "label": "Дата заключения договора (ДД.ММ.ГГГГ)",
+                "value": "",
+                "required": True
+            })
+        document_fields.append({
+            "key": "responsible_person_genitive",
+            "label": "ФИО ответственного лица (родительный падеж)",
+            "value": self._document_name_genitive(responsible_person),
+            "required": True
+        })
+        return document_fields
+
+    @staticmethod
+    def _format_russian_date(value, include_suffix=True):
+        months = (
+            "января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря"
+        )
+        suffix = " г" if include_suffix else ""
+        return f"{value.day:02d} {months[value.month - 1]} {value.year}{suffix}"
+
+    @staticmethod
+    def _format_service_term(term):
+        """Добавить корректную форму слова «день» к числовому сроку."""
+        term = str(term).strip()
+        if not term.isdigit():
+            return term
+        days = int(term)
+        last_two = days % 100
+        if 11 <= last_two <= 14:
+            unit = "рабочих дней"
+        elif days % 10 == 1:
+            unit = "рабочий день"
+        elif days % 10 in (2, 3, 4):
+            unit = "рабочих дня"
+        else:
+            unit = "рабочих дней"
+        return f"{days} {unit}"
+
+    def _document_replacements(self, document_type, number, values, line_items):
+        """Сформировать значения шаблона и форматированные строки услуг."""
+        document_date = parse_ddmmyyyy(values["document_date"])
+        if document_date is None:
+            raise ValueError("Введите дату документа в формате ДД.ММ.ГГГГ.")
+        contract_date = None
+        if document_type == "specification":
+            contract_date = parse_ddmmyyyy(values.get("contract_date", ""))
+            if contract_date is None:
+                raise ValueError(
+                    "Введите дату заключения договора в формате ДД.ММ.ГГГГ."
+                )
+
+        client_id, _ = self._client_document_identity()
+        postal_address = values["postal_address"] or values["legal_address"]
+        phone = values["phone"]
+        phone_block = f"тел.: {phone}" if phone else ""
+        formatted_items = [
+            {
+                "name": item["name"],
+                "term": self._format_service_term(item["term"]),
+                "amount": f"{item['amount']:.2f}".replace(".", ",")
+            }
+            for item in line_items
+        ]
+        total = sum((item["amount"] for item in line_items), Decimal("0.00"))
+        total_text = f"{total:.2f}".replace(".", ",")
+        amount_words = amount_to_russian_words(total)
+        position = values["signature_position"]
+        genitive_position = (
+            "Генерального директора"
+            if position == "Генеральный директор"
+            else "Директора"
+        )
+        customer_person = (
+            values.get("responsible_person")
+            if document_type == "contract"
+            else values.get(
+                "responsible_person_genitive",
+                values["responsible_person"]
+            )
+        )
+        replacements = {
+            "[ID]": client_id,
+            "[название компании]": values["company"],
+            "[ответственное лицо]": customer_person,
+            "[инн/кпп]": values["inn_kpp"],
+            "[юридический адрес]": values["legal_address"],
+            "[потовый адрес, если не указан, то юридический адрес]": postal_address,
+            "[E-mail(синий текст с подчеркиванием)]": values["email"],
+            "[указывать при наличии (тел.: [тел.])]": phone_block,
+            "[должность]": position,
+            "[Должность]": genitive_position,
+            "[ответственное лицо в формате (Гущин С.А.)]": values["signature_short_name"],
+        }
+
+        if document_type == "contract":
+            russian_date = self._format_russian_date(document_date)
+            compact_date = (
+                f"{document_date.day:02d}"
+                f"{self._format_russian_date(document_date, False).split(' ', 1)[1]}"
+            )
+            replacements.update({
+                "[дата в формате (15 декабря 2025)]":
+                    f"{document_date.day} {russian_date.split(' ', 1)[1]} ",
+                "[дата в формате (01 октября 2026 г)]": russian_date,
+                "[дата в формате(01октября 2026года)]": f"{compact_date}года",
+                "[дата в формате (01октября 2026г)]": f"{compact_date}г",
+                "[форма организации в формате (Общество с ограниченной ответственностью «название компании»)]":
+                    values["organization_name"],
+                "[должность в формате (Директора)]": values["position_genitive"],
+                "[ответсвенное лицо в формате (Коровкина Евгения Сергеевича)]":
+                    values["person_genitive"],
+                "[тел. в формате (тел +7 (4855) 26-17-19, 26-77-60)]":
+                    f"тел. {phone}" if phone else "",
+                "[название компании в формате( ООО «Техно-Центр»)]": values["company"],
+                "[инн/кпп в формате (7610015191/761001001)]": values["inn_kpp"],
+                "[банковские реквизиты]": values["bank_details"],
+            })
+        else:
+            russian_date = self._format_russian_date(document_date)
+            replacements.update({
+                "[порядковый номер]": str(number),
+                "[дата в формате (01 октября 2026 г)]": russian_date,
+                "[дата (01 октября 2026 г)]": russian_date,
+                "[дата в формате (01октября 2026г)]":
+                    f"{document_date.day:02d}{self._format_russian_date(document_date, False).split(' ', 1)[1]}г",
+                "[дата в формате(01октября 2026года)]":
+                    f"{document_date.day:02d}{self._format_russian_date(document_date, False).split(' ', 1)[1]}года",
+                "[дата в формате (01.10.2026 )]": document_date.strftime("%d.%m.%Y"),
+                "[считать сумму]": total_text,
+                "[сумма в формате 00,00]": total_text,
+                "[сумма прописью в формате (Двадцать тысяч рублей 00 копеек)(жирный текст)]":
+                    amount_words,
+            })
+            if contract_date is not None:
+                contract_month = self._format_russian_date(
+                    contract_date,
+                    include_suffix=False
+                ).split(" ", 1)[1]
+                replacements.update({
+                    "[29октября 2026г]":
+                        f"{contract_date.day:02d}{contract_month}г",
+                    "[дата заключения договора]":
+                        self._format_russian_date(contract_date)
+                })
+
+        return replacements, formatted_items, document_date
+
+    def _show_document_save_dialog(
+        self,
+        generator,
+        docx_path,
+        pdf_path,
+        target_dir,
+        create_target_dir=False
+    ):
+        """Оставить предпросмотр Word открытым до сохранения или отмены."""
+        dialog = tk.Toplevel(self.card_window)
+        dialog.title("Проверка документа")
+        dialog.geometry("440x180")
+        dialog.transient(self.card_window)
+        tk.Label(
+            dialog,
+            text=(
+                "Проверьте документ в Microsoft Word.\n"
+                "После проверки вернитесь сюда и нажмите «Сохранить»."
+            ),
+            justify=tk.LEFT,
+            wraplength=400
+        ).pack(fill=tk.BOTH, expand=True, padx=20, pady=18)
+
+        def finish_preview():
+            try:
+                generator.close()
+            except Exception as error:
+                messagebox.showerror(
+                    "Ошибка закрытия предпросмотра",
+                    f"Не удалось закрыть Word:\n{error}",
+                    parent=dialog
+                )
+            dialog.destroy()
+
+        def save_document():
+            directory_created = False
+            try:
+                if create_target_dir and not target_dir.exists():
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    directory_created = True
+                generator.save(docx_path, pdf_path)
+            except Exception as error:
+                messagebox.showerror(
+                    "Ошибка сохранения",
+                    f"Не удалось сохранить документ:\n{error}",
+                    parent=dialog
+                )
+                if directory_created:
+                    try:
+                        if not any(target_dir.iterdir()):
+                            target_dir.rmdir()
+                    except OSError as cleanup_error:
+                        messagebox.showwarning(
+                            "Очистка папки",
+                            f"Не удалось удалить пустую папку:\n{cleanup_error}",
+                            parent=dialog
+                        )
+                finish_preview()
+                return
+
+            try:
+                generator.close()
+            except Exception as error:
+                messagebox.showwarning(
+                    "Предпросмотр",
+                    f"Документы сохранены, но Word не удалось закрыть:\n{error}",
+                    parent=dialog
+                )
+            dialog.destroy()
+            try:
+                os.startfile(str(docx_path))
+            except OSError as error:
+                messagebox.showwarning(
+                    "Документ сохранён",
+                    f"Документ сохранён, но не удалось открыть его в Word:\n{error}",
+                    parent=self.card_window
+                )
+            self._refresh_documents()
+            self._refresh_completed_works()
+
+        buttons = tk.Frame(dialog)
+        buttons.pack(fill=tk.X, padx=16, pady=(0, 14))
+        tk.Button(buttons, text="Отмена", command=finish_preview).pack(side=tk.RIGHT)
+        tk.Button(
+            buttons,
+            text="Сохранить",
+            command=save_document
+        ).pack(side=tk.RIGHT, padx=(0, 8))
+        dialog.protocol("WM_DELETE_WINDOW", finish_preview)
+        center_toplevel(dialog)
+        self.card_window.wait_window(dialog)
+
+    def _open_document_client_folder(self):
         try:
-            self._create_docx_placeholder(docx_path)
-            docx_created = True
-            self._create_pdf_placeholder(pdf_path, pdf_lines)
-        except Exception:
-            if docx_created:
-                docx_path.unlink(missing_ok=True)
-            raise
+            client_dir = self._ensure_client_documents_dir()
+            os.startfile(str(client_dir))
+        except OSError as error:
+            messagebox.showerror(
+                "Папка клиента",
+                f"Не удалось открыть папку клиента:\n{error}",
+                parent=self.card_window
+            )
+
+    def _create_template_document(self, document_type, target_dir, number, create_target_dir=False):
+        """Подготовить данные, открыть жёлтый предпросмотр и сохранить шаблон."""
+        titles = {
+            "contract": "Создание договора",
+            "specification": "Создание спецификации",
+            "act": "Создание акта"
+        }
+        template_names = {
+            "contract": "шаблон договора.doc",
+            "specification": "шаблон спецификации.doc",
+            "act": "шаблон акта.docx"
+        }
+        input_data = show_document_input_dialog(
+            self.card_window,
+            titles[document_type],
+            self._document_form_fields(document_type),
+            include_line_items=document_type != "contract",
+            open_client_folder=lambda: self._open_document_client_folder()
+        )
+        if input_data is None:
+            return
+
+        values = input_data["values"]
+        try:
+            replacements, line_items, document_date = self._document_replacements(
+                document_type,
+                number,
+                values,
+                input_data["line_items"]
+            )
+            client_id, company = self._client_document_identity()
+            if document_type == "contract":
+                file_name = f"договор {client_id} от {document_date:%d.%m.%Y} {company}"
+            elif document_type == "specification":
+                file_name = f"спецификация {number} к договору {client_id} {company}"
+            else:
+                file_name = f"акт {client_id}-{number} от {document_date:%d.%m.%Y} {company}"
+
+            docx_path = target_dir / f"{file_name}.docx"
+            pdf_path = target_dir / f"{file_name}.pdf"
+            if docx_path.exists() or pdf_path.exists():
+                raise FileExistsError("Документ с таким именем уже существует.")
+
+            template_path = Path(__file__).resolve().parents[1] / "clients_files" / template_names[document_type]
+            generator = PythonDocumentGenerator(
+                template_path,
+                replacements,
+                line_items=line_items,
+                line_table_index=1 if document_type != "contract" else None
+            )
+            try:
+                generator.show_preview()
+            except Exception:
+                generator.close()
+                raise
+            self._show_document_save_dialog(
+                generator,
+                docx_path,
+                pdf_path,
+                target_dir,
+                create_target_dir
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "Ошибка создания документа",
+                f"Не удалось подготовить документ:\n{error}",
+                parent=self.card_window
+            )
+
+    def _create_contract(self):
+        """Создать договор по шаблону и сохранить DOCX и PDF после проверки."""
+        try:
+            client_dir = self._ensure_client_documents_dir()
+            self._create_template_document(
+                "contract",
+                client_dir / "договоры",
+                str(self._client_document_identity()[0]),
+                create_target_dir=True
+            )
+        except Exception as error:
+            messagebox.showerror(
+                "Ошибка",
+                f"Не удалось создать договор:\n{error}",
+                parent=self.card_window
+            )
 
     def _create_specification(self):
-        """Создать нумерованную папку спецификации и пустой DOCX-шаблон."""
+        """Создать нумерованную папку спецификации и документы по шаблону."""
         try:
             client_dir = self._ensure_client_documents_dir()
             specifications_dir = client_dir / "спецификации"
-            specifications_dir.mkdir(exist_ok=True)
+            entries = (
+                specifications_dir.iterdir()
+                if specifications_dir.is_dir()
+                else ()
+            )
             numbers = [
                 int(match.group(1))
-                for entry in specifications_dir.iterdir()
+                for entry in entries
                 if entry.is_dir()
                 and (match := re.fullmatch(r"спецификация\s+(\d+)", entry.name, re.IGNORECASE))
             ]
             number = max(numbers, default=0) + 1
             specification_dir = specifications_dir / f"спецификация {number}"
-            specification_dir.mkdir()
-            client_id, company = self._client_document_identity()
-            document_name = (
-                f"спецификация {number} к договору {client_id} {company}"
-            )
-            lines = [
-                f"Спецификация {number} к договору {client_id}",
-                company
-            ]
-            self._create_document_pair(
-                specification_dir / f"{document_name}.docx",
-                specification_dir / f"{document_name}.pdf",
-                lines
-            )
-            self._refresh_documents()
-        except OSError as error:
-            messagebox.showerror(
-                "Ошибка",
-                f"Не удалось создать спецификацию:\n{error}",
-                parent=self.card_window
+            self._create_template_document(
+                "specification",
+                specification_dir,
+                number,
+                create_target_dir=True
             )
         except Exception as error:
             messagebox.showerror(
@@ -906,17 +1581,6 @@ class ClientCardView:
                 f"Не удалось создать спецификацию:\n{error}",
                 parent=self.card_window
             )
-        finally:
-            if "specification_dir" in locals() and specification_dir.exists():
-                try:
-                    if not any(specification_dir.iterdir()):
-                        specification_dir.rmdir()
-                except OSError as cleanup_error:
-                    messagebox.showwarning(
-                        "Очистка папки",
-                        f"Не удалось удалить пустую папку спецификации:\n{cleanup_error}",
-                        parent=self.card_window
-                    )
 
     def _choose_specification_folder(self):
         """Показать список папок спецификаций и вернуть выбранную."""
@@ -983,32 +1647,13 @@ class ClientCardView:
         return result["folder"]
 
     def _create_act(self):
-        """Создать акт и PDF-копию в папке выбранной спецификации."""
+        """Создать акт по шаблону в папке выбранной спецификации."""
         specification_dir = self._choose_specification_folder()
         if not specification_dir:
             return
 
-        today = date.today().strftime("%d.%m.%Y")
-        date_text = simpledialog.askstring(
-            "Дата договора",
-            "Укажите дату договора (ДД.ММ.ГГГГ):",
-            initialvalue=today,
-            parent=self.card_window
-        )
-        if date_text is None:
-            return
-        date_text = date_text.strip() or today
-        contract_date = parse_ddmmyyyy(date_text)
-        if contract_date is None:
-            messagebox.showerror(
-                "Неверная дата",
-                "Введите дату договора в формате ДД.ММ.ГГГГ.",
-                parent=self.card_window
-            )
-            return
-
         try:
-            client_id, company = self._client_document_identity()
+            client_id, _ = self._client_document_identity()
             numbers = []
             for entry in specification_dir.iterdir():
                 if not entry.is_file():
@@ -1027,24 +1672,10 @@ class ClientCardView:
                 if match:
                     numbers.append(int(match.group(1)))
             number = max(numbers, default=0) + 1
-            document_name = (
-                f"акт {client_id}-{number} от "
-                f"{contract_date.strftime('%d.%m.%Y')} {company}"
-            )
-            self._create_document_pair(
-                specification_dir / f"{document_name}.docx",
-                specification_dir / f"{document_name}.pdf",
-                [
-                    f"Акт {client_id}-{number} от {contract_date.strftime('%d.%m.%Y')}",
-                    company
-                ]
-            )
-            self._refresh_documents()
-        except OSError as error:
-            messagebox.showerror(
-                "Ошибка",
-                f"Не удалось создать акт:\n{error}",
-                parent=self.card_window
+            self._create_template_document(
+                "act",
+                specification_dir,
+                number
             )
         except Exception as error:
             messagebox.showerror(

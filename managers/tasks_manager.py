@@ -112,8 +112,7 @@ class TasksManager:
         self.db.execute(query, (task_id,))
 
     def search(self, query_text):
-        """Поиск задач"""
-        # Поиск по имени клиента только (c.company), нечувствительный к регистру.
+        """Ищет задачи по комментарию, описанию и названию клиента."""
         tokens = [tok.strip() for tok in str(query_text).split() if tok.strip()]
         if not tokens:
             return []
@@ -121,8 +120,14 @@ class TasksManager:
         where_clauses = []
         params = []
         for tok in tokens:
-            where_clauses.append("LOWER(COALESCE(c.company, '')) LIKE ?")
-            params.append(f"%{tok.lower()}%")
+            where_clauses.append(
+                "("
+                "FUZZY_CONTAINS(t.title, ?) = 1 OR "
+                "FUZZY_CONTAINS(t.description, ?) = 1 OR "
+                "FUZZY_CONTAINS(c.company, ?) = 1"
+                ")"
+            )
+            params.extend((tok, tok, tok))
 
         where_sql = " AND ".join(where_clauses)
         query = f"""

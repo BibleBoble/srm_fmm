@@ -109,9 +109,31 @@ class ClientsManager:
         return dict(row) if row else None
 
     def search(self, query_text):
-        """Поиск клиентов с основной контактной информацией"""
-        # Нечувствительный к регистру поиск по названию компании, имени контактного лица и email
-        search_term = f"%{query_text.lower()}%"
+        """Ищет клиентов по всем словам запроса в карточке и контактах."""
+        tokens = [
+            token.casefold()
+            for token in str(query_text).split()
+            if token.strip()
+        ]
+        if not tokens:
+            return []
+
+        where_clauses = []
+        params = []
+        for token in tokens:
+            where_clauses.append(
+                "("
+                "FUZZY_CONTAINS(c.company, ?) = 1 OR "
+                "FUZZY_CONTAINS(cp.full_name, ?) = 1 OR "
+                "FUZZY_CONTAINS(ce.email, ?) = 1 OR "
+                "FUZZY_CONTAINS(COALESCE(c.public_id, ''), ?) = 1 OR "
+                "CAST(c.id AS TEXT) LIKE ?"
+                ")"
+            )
+            params.extend(
+                (token, token, token, token, f"%{token}%")
+            )
+
         query = """
             SELECT 
                 c.*,
@@ -122,17 +144,10 @@ class ClientsManager:
             FROM clients c
             LEFT JOIN contact_persons cp ON c.id = cp.client_id AND cp.is_primary = 1
             LEFT JOIN contact_emails ce ON cp.id = ce.contact_person_id AND ce.is_primary = 1
-            WHERE LOWER(c.company) LIKE ?
-               OR LOWER(cp.full_name) LIKE ?
-               OR LOWER(ce.email) LIKE ?
-               OR LOWER(COALESCE(c.public_id, '')) LIKE ?
-               OR CAST(c.id AS TEXT) LIKE ?
+            WHERE {where_sql}
             ORDER BY c.company
-        """
-        rows = self.db.fetch_all(
-            query,
-            (search_term, search_term, search_term, search_term, search_term)
-        )
+        """.format(where_sql=" AND ".join(where_clauses))
+        rows = self.db.fetch_all(query, params)
         return [dict(row) for row in rows]
 
     def update(self, client_id, company, address, notes, partner_data=None):

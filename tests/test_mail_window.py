@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from views.mail_window import MailWindowController
 
@@ -60,6 +60,34 @@ class MailWindowStartupTests(unittest.TestCase):
         self.assertEqual(command[-2:], ["1200", "800"])
         thread.return_value.start.assert_called_once_with()
 
+    def test_background_start_does_not_show_browser(self):
+        self.host_frame.winfo_width.return_value = 1200
+        self.host_frame.winfo_height.return_value = 800
+
+        with (
+            patch.object(self.controller, "_start_process") as start_process,
+            patch.object(self.controller, "_send_command") as send_command,
+        ):
+            self.controller.start_background()
+
+        start_process.assert_called_once_with()
+        send_command.assert_not_called()
+
+    def test_show_requests_embedded_browser_visibility(self):
+        self.controller.process = Mock()
+        self.controller.process.poll.return_value = None
+        self.host_frame.winfo_width.return_value = 1200
+        self.host_frame.winfo_height.return_value = 800
+
+        with patch.object(self.controller, "_send_command") as send_command:
+            self.controller.show()
+            self.root.after_idle.call_args.args[0]()
+
+        self.assertEqual(
+            send_command.call_args_list,
+            [call("resize 1200 800"), call("show")]
+        )
+
     def test_navigation_failure_is_reported_to_user(self):
         self.controller._startup_complete = True
         self.controller.process = Mock()
@@ -76,19 +104,44 @@ class MailWindowStartupTests(unittest.TestCase):
         self.assertIn("ConnectionAborted", showerror.call_args.args[1])
         self.assertTrue(self.controller._page_loaded)
 
-    def test_switching_sections_does_not_hide_native_webview(self):
+    def test_switching_sections_hides_native_webview(self):
         self.controller._visible = True
+        self.controller.process = Mock()
+        self.controller.process.poll.return_value = None
 
         with patch.object(self.controller, "_send_command") as send_command:
             self.controller.hide()
 
         self.assertFalse(self.controller._visible)
-        send_command.assert_not_called()
+        send_command.assert_called_once_with("hide")
+        self.host_frame.grid_remove.assert_called_once_with()
+        self.assertFalse(self.controller._host_mapped)
+
+    def test_returning_to_mail_restores_host_before_showing_webview(self):
+        self.controller._host_mapped = False
+        self.controller.process = Mock()
+        self.controller.process.poll.return_value = None
+        self.host_frame.winfo_width.return_value = 1200
+        self.host_frame.winfo_height.return_value = 800
+
+        with patch.object(self.controller, "_send_command") as send_command:
+            self.controller.show()
+            self.root.after_idle.call_args.args[0]()
+
+        self.host_frame.grid.assert_called_once_with()
+        self.host_frame.tkraise.assert_called_once_with()
+        self.assertTrue(self.controller._host_mapped)
+        self.assertEqual(
+            send_command.call_args_list,
+            [call("resize 1200 800"), call("show")]
+        )
 
     def test_restoring_application_requests_webview_repaint(self):
         self.controller._visible = True
         self.controller.process = Mock()
         self.controller.process.poll.return_value = None
+        self.host_frame.winfo_width.return_value = 1200
+        self.host_frame.winfo_height.return_value = 800
 
         with patch.object(self.controller, "_send_command") as send_command:
             self.controller._on_root_mapped(
@@ -96,7 +149,10 @@ class MailWindowStartupTests(unittest.TestCase):
             )
             self.root.after_idle.call_args.args[0]()
 
-        send_command.assert_called_once_with("refresh")
+        self.assertEqual(
+            send_command.call_args_list,
+            [call("resize 1200 800"), call("show")]
+        )
         self.assertEqual(self.pending_callbacks, [])
 
 

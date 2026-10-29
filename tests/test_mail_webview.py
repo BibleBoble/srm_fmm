@@ -1,106 +1,70 @@
+import io
+import queue
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 from views.mail_webview import (
     MAIL_URL,
-    _create_mail_window,
-    _prepare_embedded_window,
-    _refresh_embedded_window,
-    _set_embedded_window_size,
-    _show_embedded_window
+    SWP_NOACTIVATE,
+    SWP_NOZORDER,
+    SWP_SHOWWINDOW,
+    _page_host,
+    _read_commands,
+    _resize_window,
+    _show_window
 )
 
 
-class MailWebViewWindowTests(unittest.TestCase):
-    def test_mail_window_starts_hidden_until_embedded(self):
-        webview = Mock()
-        expected_window = object()
-        webview.create_window.return_value = expected_window
+class MailWebViewTests(unittest.TestCase):
+    def test_mail_url_uses_yandex_mail(self):
+        self.assertEqual(MAIL_URL, "https://mail.yandex.ru")
 
-        result = _create_mail_window(webview, 1280, 720)
-
-        self.assertIs(result, expected_window)
-        webview.create_window.assert_called_once_with(
-            "Яндекс.Почта",
-            MAIL_URL,
-            width=1280,
-            height=720,
-            min_size=(400, 300),
-            frameless=True,
-            hidden=True,
-            focus=False
+    def test_page_host_omits_query_and_path(self):
+        self.assertEqual(
+            _page_host("https://mail.yandex.ru/inbox?uid=private"),
+            "mail.yandex.ru"
         )
 
-    def test_mail_window_dimensions_are_positive(self):
-        webview = Mock()
+    def test_command_reader_queues_supported_commands(self):
+        commands = queue.Queue()
+        command_input = io.StringIO(
+            "resize 1280 720\nshow\nhide\nrefresh\nquit\n"
+        )
 
-        _create_mail_window(webview, 0, -1)
+        with patch("views.mail_webview.sys.stdin", command_input):
+            _read_commands(commands)
 
-        self.assertEqual(webview.create_window.call_args.kwargs["width"], 1)
-        self.assertEqual(webview.create_window.call_args.kwargs["height"], 1)
+        self.assertEqual(
+            [commands.get_nowait() for _ in range(commands.qsize())],
+            [
+                ("resize", 1280, 720),
+                ("show",),
+                ("hide",),
+                ("refresh",),
+                ("quit",)
+            ]
+        )
 
-    def test_child_window_is_sized_before_it_is_shown(self):
-        order = Mock()
-        user32 = Mock()
-        user32.SetWindowPos.side_effect = lambda *args: order.size()
-        window = Mock()
-        window.show.side_effect = order.show
-
-        _show_embedded_window(window, user32, 123, 1280, 720)
-
-        user32.SetWindowPos.assert_called_once()
-        window.show.assert_called_once_with()
-        self.assertEqual(order.mock_calls, [call.size(), call.show()])
-
-    def test_resize_does_not_force_window_visible(self):
+    def test_resize_keeps_child_window_in_place(self):
         user32 = Mock()
         user32.SetWindowPos.return_value = 1
 
-        _set_embedded_window_size(user32, 123, 800, 600)
+        _resize_window(user32, 123, 800, 600)
 
-        flags = user32.SetWindowPos.call_args.args[-1]
-        self.assertEqual(flags & 0x0040, 0)
+        arguments = user32.SetWindowPos.call_args.args
+        self.assertEqual(arguments[-1] & SWP_NOZORDER, SWP_NOZORDER)
+        self.assertEqual(arguments[-1] & SWP_NOACTIVATE, SWP_NOACTIVATE)
 
-    def test_refresh_repaints_embedded_window_and_child_controls(self):
+    def test_show_uses_host_size_without_activating_window(self):
         user32 = Mock()
-        user32.RedrawWindow.return_value = 1
+        user32.SetWindowPos.return_value = 1
 
-        _refresh_embedded_window(user32, 123)
+        _show_window(user32, 123, 800, 600)
 
-        redraw_flags = user32.RedrawWindow.call_args.args[-1]
-        self.assertEqual(redraw_flags & 0x0080, 0x0080)
-        self.assertEqual(redraw_flags & 0x0100, 0x0100)
-        self.assertEqual(user32.RedrawWindow.call_args.args[0].value, 123)
-
-    def test_embedding_is_ready_only_after_native_form_is_processed(self):
-        window = Mock()
-        ready = Mock()
-        errors = Mock()
-
-        with (
-            patch("views.mail_webview._attach_navigation_diagnostics") as diagnostics,
-            patch("views.mail_webview._embed_window") as embed,
-        ):
-            _prepare_embedded_window(window, 44, 800, 600, ready, errors)
-
-        diagnostics.assert_called_once_with(window)
-        embed.assert_called_once_with(window, 44, 800, 600)
-        ready.set.assert_called_once_with()
-        errors.put.assert_not_called()
-
-    def test_embedding_failure_is_reported_and_unblocks_startup(self):
-        window = Mock()
-        ready = Mock()
-        errors = Mock()
-
-        with patch(
-            "views.mail_webview._attach_navigation_diagnostics",
-            side_effect=RuntimeError("Native form is not initialized")
-        ):
-            _prepare_embedded_window(window, 44, 800, 600, ready, errors)
-
-        errors.put.assert_called_once_with("Native form is not initialized")
-        ready.set.assert_called_once_with()
+        arguments = user32.SetWindowPos.call_args.args
+        self.assertEqual(arguments[4:6], (800, 600))
+        self.assertEqual(arguments[-1] & SWP_NOACTIVATE, SWP_NOACTIVATE)
+        self.assertEqual(arguments[-1] & SWP_SHOWWINDOW, SWP_SHOWWINDOW)
 
 
 if __name__ == "__main__":
