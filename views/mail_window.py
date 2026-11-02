@@ -1,370 +1,57 @@
-"""Управление встроенным окном Яндекс.Почты."""
-import queue
-import subprocess
-import sys
-import threading
-import time
-from pathlib import Path
+# -*- coding: utf-8 -*-
+"""
+Управление встроенным браузером Яндекс.Почты через tkwebview2.WebView2.
+Браузер создаётся лениво — только при первом открытии раздела «Почта».
+При переключении в другой раздел фрейм скрывается через pack_forget(),
+а не удаляется, поэтому при возврате сайт открывается мгновенно.
+"""
+import tkinter as tk
+from tkwebview2.tkwebview2 import WebView2
 from tkinter import messagebox
 
 
+MAIL_URL = "https://mail.yandex.ru"
+
+
 class MailWindowController:
-    """Запускает отдельный Qt WebEngine и управляет его дочерним HWND."""
+    """Управляет встроенным WebView2 браузером в разделе «Почта»."""
 
-    MIN_HOST_WIDTH = 100
-    MIN_HOST_HEIGHT = 100
-    STARTUP_TIMEOUT = 45
-    NAVIGATION_TIMEOUT = 60
-
-    def __init__(self, root, host_frame):
-        self.root = root
-        self.host_frame = host_frame
-        self.process = None
-        self._closing = False
-        self._visible = False
-        self._host_mapped = True
-        self._output_queue = queue.Queue()
-        self._startup_deadline = None
-        self._navigation_deadline = None
-        self._startup_complete = False
-        self._page_loaded = False
-        self._error_reported = False
-        self._poll_job = None
-        self._resize_job = None
-        self._start_job = None
-        self._show_job = None
-        self._start_deadline = None
-        self.host_frame.bind("<Configure>", self._on_host_resize, add="+")
-        self.root.bind("<Map>", self._on_root_mapped, add="+")
+    def __init__(self, parent_frame):
+        """
+        Args:
+            parent_frame: tk.Frame — контейнер, в который встраивается браузер
+        """
+        self.parent_frame = parent_frame
+        self.browser = None
+        self._created = False
 
     def show(self):
-        """Показывает встроенный браузер либо запускает его."""
-        if self._closing:
-            return
-
-        self._visible = True
-        self._show_host()
-        self.host_frame.tkraise()
-        self.host_frame.update_idletasks()
-        if self._is_running():
-            if self._show_job is not None:
-                self.root.after_cancel(self._show_job)
-            self._show_job = self.root.after_idle(self._show_browser)
-            return
-
-        self._start_when_sized()
-
-    def _show_browser(self):
-        self._show_job = None
-        if not self._visible or not self._is_running():
-            return
-        self.host_frame.update_idletasks()
-        width, height = self._host_size()
-        self._send_command(f"resize {width} {height}")
-        self._send_command("show")
-
-    def start_background(self):
-        """Запускает WebView при старте приложения, не открывая вкладку."""
-        if self._closing or self._is_running():
-            return
-        self.host_frame.update_idletasks()
-        self._start_when_sized()
+        """Показывает раздел с почтой. Создаёт браузер при первом вызове."""
+        if self.browser is None:
+            self._create_browser()
+        self.parent_frame.pack(fill="both", expand=True)
 
     def hide(self):
-        """Скрывает HWND браузера перед показом другого раздела."""
-        self._visible = False
-        if self._show_job is not None:
-            self.root.after_cancel(self._show_job)
-            self._show_job = None
-        self._send_command("hide")
-        self._hide_host()
+        """Скрывает раздел с почтой (не удаляет браузер)."""
+        self.parent_frame.pack_forget()
 
-    def _show_host(self):
-        if not self._host_mapped:
-            self.host_frame.grid()
-            self._host_mapped = True
+    def _create_browser(self):
+        """Создаёт WebView2 и загружает Яндекс.Почту."""
+        self.parent_frame.update_idletasks()
+        width = max(self.parent_frame.winfo_width(), 800)
+        height = max(self.parent_frame.winfo_height(), 600)
 
-    def _hide_host(self):
-        if self._host_mapped and self._is_running():
-            self.host_frame.grid_remove()
-            self._host_mapped = False
-
-    def _is_running(self):
-        return self.process is not None and self.process.poll() is None
-
-    def _host_size(self):
-        return (
-            max(self.host_frame.winfo_width(), 1),
-            max(self.host_frame.winfo_height(), 1)
-        )
-
-    def _start_when_sized(self):
-        if self._closing or self._start_job is not None:
-            return
-
-        width, height = self._host_size()
-        if width >= self.MIN_HOST_WIDTH and height >= self.MIN_HOST_HEIGHT:
-            self._start_deadline = None
-            self._start_process()
-            return
-
-        if self._start_deadline is None:
-            self._start_deadline = time.monotonic() + 10
-        if time.monotonic() >= self._start_deadline:
-            self._start_deadline = None
-            self._show_error(
-                "Не удалось определить размер области почты. "
-                "Переключитесь на вкладку «Почта» и попробуйте снова."
-            )
-            return
-
-        self._start_job = self.root.after(100, self._retry_start_when_sized)
-
-    def _retry_start_when_sized(self):
-        self._start_job = None
-        self._start_when_sized()
-
-    def _start_process(self):
-        if self._closing or self._is_running():
-            return
-
-        while True:
-            try:
-                self._output_queue.get_nowait()
-            except queue.Empty:
-                break
-
-        project_root = Path(__file__).resolve().parent.parent
-        project_interpreter = project_root / ".venv" / "Scripts" / "python.exe"
-        interpreter = (
-            str(project_interpreter)
-            if project_interpreter.is_file()
-            else sys.executable
-        )
-        width, height = self._host_size()
-        command = [
-            interpreter,
-            "-X",
-            "utf8",
-            "-m",
-            "views.mail_webview",
-            str(self.host_frame.winfo_id()),
-            str(width),
-            str(height)
-        ]
-
-        try:
-            self.process = subprocess.Popen(
-                command,
-                cwd=str(project_root),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            )
-        except OSError as error:
-            self.process = None
-            self._show_error(f"Не удалось запустить окно почты:\n{error}")
-            return
-
-        self._startup_complete = False
-        self._page_loaded = False
-        self._error_reported = False
-        self._startup_deadline = time.monotonic() + self.STARTUP_TIMEOUT
-        self._navigation_deadline = None
-        threading.Thread(
-            target=self._read_process_output,
-            args=(self.process,),
-            daemon=True
-        ).start()
-        self._poll_job = self.root.after(100, self._drain_process_output)
-
-        if self._visible:
-            self._show_browser()
-        else:
-            self._hide_host()
-
-    def _send_command(self, command):
-        process = self.process
-        if not self._is_running() or process.stdin is None:
-            return
-        try:
-            process.stdin.write(f"{command}\n")
-            process.stdin.flush()
-        except (BrokenPipeError, OSError) as error:
-            print(f"Не удалось передать команду окну почты: {error}")
-
-    def _on_host_resize(self, event):
-        if (
-            event.width < self.MIN_HOST_WIDTH
-            or event.height < self.MIN_HOST_HEIGHT
-        ):
-            return
-
-        if not self._is_running():
-            if self._start_job is not None:
-                self.root.after_cancel(self._start_job)
-                self._start_job = None
-            self._start_deadline = None
-            self._start_process()
-            return
-
-        if self._resize_job is not None:
-            self.root.after_cancel(self._resize_job)
-        self._resize_job = self.root.after(
-            75,
-            lambda width=event.width, height=event.height: self._resize_host(
-                width,
-                height
-            )
-        )
-
-    def _resize_host(self, width, height):
-        self._resize_job = None
-        self._send_command(f"resize {width} {height}")
-
-    def _on_root_mapped(self, event):
-        if event.widget is self.root and self._visible:
-            self.root.after_idle(self._refresh_after_restore)
-
-    def _refresh_after_restore(self):
-        if not self._visible or not self._is_running():
-            return
-        self._show_host()
-        self.host_frame.tkraise()
-        self.host_frame.update_idletasks()
-        self._show_browser()
-
-    def _read_process_output(self, process):
-        if process.stdout is None:
-            return
-        for line in process.stdout:
-            message = line.strip()
-            if message == "READY" or message.startswith(
-                ("ERROR:", "NAVIGATION_COMPLETED:", "NAVIGATION_FAILED:")
-            ):
-                self._output_queue.put(message)
-
-    def _drain_process_output(self):
-        self._poll_job = None
-        if self._closing:
-            return
-
-        while True:
-            try:
-                message = self._output_queue.get_nowait()
-            except queue.Empty:
-                break
-
-            if message.startswith("ERROR:"):
-                self._error_reported = True
-                self._startup_complete = True
-                self._page_loaded = True
-                self._show_error(
-                    "Не удалось запустить встроенную Яндекс.Почту.\n\n"
-                    f"{message.removeprefix('ERROR:').strip()}"
-                )
-                self._send_command("quit")
-            elif message == "READY":
-                self._startup_complete = True
-                self._startup_deadline = None
-            elif message.startswith("NAVIGATION_COMPLETED:"):
-                self._page_loaded = True
-                self._navigation_deadline = None
-            elif message.startswith("NAVIGATION_FAILED:"):
-                self._page_loaded = True
-                self._navigation_deadline = None
-                self._show_error(
-                    "Яндекс.Почта не загрузилась.\n\n"
-                    f"{message.removeprefix('NAVIGATION_FAILED:').strip()}"
-                )
-
-        if self._is_running() and not self._startup_complete:
-            if (
-                self._startup_deadline is not None
-                and time.monotonic() >= self._startup_deadline
-                and not self._error_reported
-            ):
-                self._error_reported = True
-                self._show_error(
-                    "Qt WebEngine не запустился за отведённое время. "
-                    "Проверьте установку зависимостей проекта."
-                )
-                self._send_command("quit")
-            self._poll_job = self.root.after(250, self._drain_process_output)
-            return
-
-        if self._is_running() and not self._page_loaded:
-            if not self._visible:
-                self._poll_job = self.root.after(
-                    1000,
-                    self._drain_process_output
-                )
-                return
-            if self._navigation_deadline is None:
-                self._navigation_deadline = (
-                    time.monotonic() + self.NAVIGATION_TIMEOUT
-                )
-            elif (
-                time.monotonic() >= self._navigation_deadline
-                and not self._error_reported
-            ):
-                self._error_reported = True
-                self._page_loaded = True
-                self._show_error(
-                    "Яндекс.Почта не завершила загрузку. "
-                    "Проверьте подключение к Интернету."
-                )
-            self._poll_job = self.root.after(1000, self._drain_process_output)
-            return
-
-        if not self._is_running() and not self._error_reported:
-            self._error_reported = True
-            self._show_error(
-                "Процесс встроенной почты завершился. "
-                "Перезапустите приложение и попробуйте снова."
-            )
-
-    def _show_error(self, message):
-        if not self._closing:
-            messagebox.showerror("Почта", message, parent=self.root)
+        self.browser = WebView2(self.parent_frame, width, height)
+        self.browser.pack(fill="both", expand=True)
+        self.browser.load_url(MAIL_URL)
+        self._created = True
 
     def close(self):
-        """Корректно завершает почтовый процесс перед закрытием приложения."""
-        self._closing = True
-        for job in (
-            self._poll_job,
-            self._resize_job,
-            self._start_job,
-            self._show_job
-        ):
-            if job is not None:
-                self.root.after_cancel(job)
-        self._poll_job = None
-        self._resize_job = None
-        self._start_job = None
-        self._show_job = None
-
-        process = self.process
-        if process is None or process.poll() is not None:
-            return
-
-        try:
-            if process.stdin is not None:
-                process.stdin.write("quit\n")
-                process.stdin.flush()
-            process.wait(timeout=5)
-        except (BrokenPipeError, OSError, subprocess.TimeoutExpired) as error:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-            if not isinstance(error, BrokenPipeError):
-                print(f"Не удалось штатно закрыть окно почты: {error}")
+        """Закрывает браузер и освобождает ресурсы."""
+        if self.browser is not None:
+            try:
+                self.browser.destroy_window()
+            except Exception:
+                pass
+            self.browser = None
+        self._created = False

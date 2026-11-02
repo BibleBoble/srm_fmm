@@ -62,7 +62,6 @@ class App:
 
         # Открываем основной рабочий раздел при запуске.
         self.show_tasks()
-        self.root.after_idle(self.mail_window.start_background)
 
     def _setup_window(self):
         """Настройка главного окна в классическом стиле"""
@@ -191,13 +190,16 @@ class App:
                 )
 
     def _create_content_area(self):
-        """Создаёт область для контента"""
+        """Создаёт область для контента основных разделов."""
         self.content_frame = tk.Frame(self.root, bg=Colors.LIGHT)
-        self.mail_host = tk.Frame(self.root, bg=Colors.WHITE, bd=0, highlightthickness=0)
-        for frame in (self.content_frame, self.mail_host):
-            frame.grid(row=1, column=0, sticky="nsew")
+        self.content_frame.grid(row=1, column=0, sticky="nsew")
         self.content_frame.tkraise()
-        self.mail_window = MailWindowController(self.root, self.mail_host)
+
+        # Фрейм для раздела «Почта» — встраивается в основное окно.
+        # Скрывается через pack_forget(), не удаляется, чтобы при возврате
+        # сайт открывался мгновенно без перезагрузки.
+        self.mail_host_frame = tk.Frame(self.root, bg=Colors.WHITE)
+        self.mail_window = None  # MailWindowController создаётся лениво
 
     def _create_views(self):
         """Создаёт все представления (но не отображает их)"""
@@ -219,7 +221,8 @@ class App:
         """Обработчик выхода из приложения"""
         from tkinter import messagebox
         if messagebox.askyesno("Выход", "Вы действительно хотите выйти?"):
-            self.mail_window.close()
+            if self.mail_window is not None:
+                self.mail_window.close()
             # Закрываем соединение с БД
             from managers.database import Database
             db = Database()
@@ -258,13 +261,16 @@ class App:
         self.reports_view.show()
 
     def show_mail(self):
-        """Открывает или возвращает на экран окно Яндекс.Почты."""
+        """Открывает раздел «Почта» встроенным браузером WebView2."""
         self._set_active_menu("Почта")
-        self.mail_host.tkraise()
-        self.root.update_idletasks()
+        self.content_frame.grid_remove()
+        self.mail_host_frame.grid(row=1, column=0, sticky="nsew")
+        if self.mail_window is None:
+            self.mail_window = MailWindowController(self.mail_host_frame)
         self.mail_window.show()
 
     def _show_standard_content(self):
-        """Переключается с почты на контейнер стандартных разделов."""
-        self.mail_window.hide()
+        """Переключается на контейнер стандартных разделов."""
+        self.mail_host_frame.grid_remove()
+        self.content_frame.grid(row=1, column=0, sticky="nsew")
         self.content_frame.tkraise()
