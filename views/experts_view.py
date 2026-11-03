@@ -2,11 +2,14 @@
 """
 Представление раздела "Эксперты" на базе TableViewTemplate
 """
+import os
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, messagebox
+from managers.works_manager import WorksManager
 from views.table_view_template import TableViewTemplate
 from utils.helpers import show_message
-from utils.constants import Colors, TableView
+from utils.constants import Colors
 from utils.ui_helpers import center_toplevel
 
 
@@ -773,6 +776,10 @@ class ExpertsView(TableViewTemplate):
         notebook.add(tab_specs, text="🛠 Виды работ")
         self._create_expert_specializations_tab(tab_specs, expert.get('specializations', []))
 
+        tab_works = tk.Frame(notebook, bg='white')
+        notebook.add(tab_works, text="✅ Выполненные работы")
+        self._create_expert_works_tab(tab_works, expert.get('id'))
+
         buttons_container = tk.Frame(card_window, bg=Colors.SURFACE, height=76)
         buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
         buttons_container.pack_propagate(False)
@@ -1000,6 +1007,121 @@ class ExpertsView(TableViewTemplate):
         if card_window.winfo_exists():
             card_window.destroy()
         self._edit_expert(expert_id)
+
+    def _create_expert_works_tab(self, parent, expert_id):
+        """Работы клиентов, закреплённые за экспертом."""
+        works_mgr = WorksManager()
+
+        toolbar = tk.Frame(parent, bg="white")
+        toolbar.pack(fill=tk.X, padx=16, pady=(14, 8))
+        tk.Label(
+            toolbar,
+            text="Выполненные работы",
+            font=("Arial", 14, "bold"),
+            bg="white",
+            fg="#243247"
+        ).pack(side=tk.LEFT)
+
+        table_frame = tk.Frame(parent, bg="white")
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 8))
+        tree = ttk.Treeview(
+            table_frame,
+            columns=("client", "work", "date", "amount", "status"),
+            show="headings",
+            selectmode="browse"
+        )
+        for column, heading, width, anchor in (
+            ("client", "Клиент", 220, "w"),
+            ("work", "Работа", 320, "w"),
+            ("date", "Дата", 100, "center"),
+            ("amount", "Стоимость, руб.", 140, "e"),
+            ("status", "Статус", 150, "center"),
+        ):
+            tree.heading(column, text=heading)
+            tree.column(column, width=width, anchor=anchor, stretch=column == "work")
+
+        scrollbar = ttk.Scrollbar(
+            table_frame, orient="vertical", command=tree.yview
+        )
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        status_label = tk.Label(
+            parent, text="", font=("Arial", 9), bg="white", fg="#64748b",
+            anchor="w"
+        )
+        status_label.pack(fill=tk.X, padx=16, pady=(0, 10))
+
+        work_folders = {}
+
+        def open_work_folder(event):
+            row_id = tree.identify_row(event.y)
+            folder = work_folders.get(row_id)
+            if folder is None:
+                return
+            try:
+                os.startfile(str(folder))
+            except OSError as error:
+                messagebox.showerror(
+                    "Работы эксперта",
+                    f"Не удалось открыть папку спецификации:\n{error}",
+                    parent=parent.winfo_toplevel()
+                )
+
+        tree.bind("<ButtonRelease-1>", open_work_folder)
+
+        def refresh():
+            for item in tree.get_children():
+                tree.delete(item)
+            work_folders.clear()
+            try:
+                works = works_mgr.list_works_for_expert(expert_id)
+            except Exception as error:  # noqa: BLE001 - показываем пользователю
+                status_label.config(text=f"Не удалось загрузить работы: {error}")
+                return
+            for work in works:
+                date_text = str(work.get("start_date") or "")
+                if len(date_text) >= 10 and date_text[4] == "-":
+                    date_text = (
+                        f"{date_text[8:10]}.{date_text[5:7]}.{date_text[:4]}"
+                    )
+                amount = (
+                    f"{float(work.get('amount') or 0):,.2f}"
+                    .replace(",", " ")
+                    .replace(".", ",")
+                )
+                tree.insert(
+                    "",
+                    "end",
+                    iid=str(work["id"]),
+                    values=(
+                        work.get("client_name") or "—",
+                        work.get("title") or "",
+                        date_text or "—",
+                        amount,
+                        WorksManager.display_status(work)
+                    )
+                )
+                source_path = work.get("source_path")
+                work_folders[str(work["id"])] = (
+                    Path(source_path).parent if source_path else None
+                )
+            status_label.config(text=f"Работ закреплено: {len(works)}")
+
+        tk.Button(
+            toolbar,
+            text="Обновить",
+            command=refresh,
+            bg="#0f766e",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            padx=12,
+            pady=6
+        ).pack(side=tk.RIGHT)
+
+        refresh()
 
     def _create_expert_specializations_tab(self, parent, specializations):
         tk.Label(

@@ -4,10 +4,9 @@
 Основан на структуре раздела "Клиенты".
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from views.base_view import BaseView
 from utils.constants import Colors, TableView, Sizes, Limits, UISettings
-from utils.helpers import show_message, show_confirmation
 from utils.ui_helpers import center_toplevel
 
 
@@ -58,7 +57,7 @@ class TableViewTemplate(BaseView):
         self.total_items = 0
         self.sort_var = tk.StringVar(value="")
         if self.SORT_OPTIONS:
-            self.sort_var.set(self.SORT_OPTIONS[0][0])
+            self.sort_var.set(self.SORT_OPTIONS[0][1])
 
     def show(self):
         """Отображает раздел"""
@@ -75,11 +74,15 @@ class TableViewTemplate(BaseView):
             height=Sizes.TOP_PANEL_HEIGHT
         )
         top_panel.grid(row=0, column=0, sticky="ew")
-        top_panel.grid_propagate(False)
+        # Высота панели фиксирована: дочерние элементы размещаются через pack,
+        # поэтому нужен pack_propagate, а не grid_propagate.
+        top_panel.pack_propagate(False)
+        self.top_panel = top_panel
 
         # Счётчик и поиск
         search_container = tk.Frame(top_panel, bg=TableView.TOP_PANEL_BG)
         search_container.pack(side=tk.LEFT, expand=True, padx=Sizes.TOP_PANEL_PADDING_X, pady=Sizes.TOP_PANEL_PADDING_Y)
+        self.search_container = search_container
 
         self.info_label = tk.Label(
             search_container,
@@ -114,24 +117,29 @@ class TableViewTemplate(BaseView):
             highlightcolor=TableView.BUTTON_BG
         )
         search_entry.pack(side=tk.LEFT, padx=5, ipady=6)
+        self.search_entry = search_entry
 
-        tk.Label(
+        self.search_hint_label = tk.Label(
             search_container,
             text=f"По полям: {self.SEARCH_FIELDS_TEXT}",
             font=TableView.LABEL_FONT,
             bg=TableView.TOP_PANEL_BG,
             fg=TableView.HINT_FG
-        ).pack(side=tk.LEFT, padx=10)
+        )
+        self.search_hint_label.pack(side=tk.LEFT, padx=10)
 
         # Сортировка (если задана)
         if self.SORT_OPTIONS:
-            tk.Label(
+            self.sort_label = tk.Label(
                 top_panel,
                 text="Сортировка:",
                 font=TableView.LABEL_FONT,
                 bg=TableView.TOP_PANEL_BG,
                 fg=TableView.LABEL_FG
-            ).pack(side=tk.LEFT, padx=(10, 5), pady=Sizes.TOP_PANEL_PADDING_Y)
+            )
+            self.sort_label.pack(
+                side=tk.LEFT, padx=(10, 5), pady=Sizes.TOP_PANEL_PADDING_Y
+            )
 
             sort_combo = ttk.Combobox(
                 top_panel,
@@ -142,6 +150,7 @@ class TableViewTemplate(BaseView):
                 font=TableView.LABEL_FONT
             )
             sort_combo.pack(side=tk.LEFT, padx=5)
+            self.sort_combo = sort_combo
             sort_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_data())
 
         # Кнопка добавления

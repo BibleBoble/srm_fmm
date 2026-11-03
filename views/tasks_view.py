@@ -21,7 +21,7 @@ class TasksView(TableViewTemplate):
 
     TITLE = "Задачи"
     ADD_BUTTON_TEXT = "+ Добавить задачу"
-    SEARCH_FIELDS_TEXT = "комментарию, описанию, клиенту"
+    SEARCH_FIELDS_TEXT = "коммент., опис., клиенту"
     COLUMNS = ("ID", "Статус", "Комментарий", "Клиент", "Приоритет", "Срок", "Действие")
     COLUMN_WIDTHS = {
         "ID": 60,
@@ -228,58 +228,52 @@ class TasksView(TableViewTemplate):
         return ("task_current",)
 
     def _create_ui(self):
-        """Создаёт весь интерфейс с улучшенной сортировкой и фильтрами"""
-        # Вызываем родительский метод для базового создания
+        """Создаёт интерфейс раздела с фильтром статуса и финансов."""
         super()._create_ui()
-        
-        # Теперь добавляем наши элементы фильтрации
-        # Находим верхнюю панель
-        top_panel = None
-        for widget in self.parent_frame.winfo_children():
-            if isinstance(widget, tk.Frame):
-                # Проверяем высоту (верхняя панель обычно ~70px)
-                try:
-                    if widget.winfo_height() == Sizes.TOP_PANEL_HEIGHT or widget.winfo_reqheight() == Sizes.TOP_PANEL_HEIGHT:
-                        top_panel = widget
-                        break
-                except:
-                    # Если не можем определить высоту, берем первый Frame
-                    if top_panel is None:
-                        top_panel = widget
-        
-        if not top_panel:
-            return
-        
-        # Находим контейнер с поиском для добавления наших элементов
-        search_container = None
-        for widget in top_panel.winfo_children():
-            if isinstance(widget, tk.Frame):
-                search_container = widget
-                break
-        
-        if not search_container:
-            return
-        
-        # Добавляем фильтр статуса
+
+        if getattr(self, "search_entry", None) is not None:
+            self.search_entry.configure(width=18)
+        if getattr(self, "sort_combo", None) is not None:
+            self.sort_combo.configure(width=10)
+        if getattr(self, "sort_label", None) is not None:
+            self.sort_label.configure(text="Сорт.:")
+        if getattr(self, "search_hint_label", None) is not None:
+            self.search_hint_label.pack_forget()
+
+        search_container = self.search_container
         tk.Label(
             search_container,
             text="Статус:",
             font=TableView.LABEL_FONT,
             bg=TableView.TOP_PANEL_BG,
             fg=TableView.LABEL_FG
-        ).pack(side=tk.LEFT, padx=(15, 5), pady=Sizes.TOP_PANEL_PADDING_Y)
-        
+        ).pack(side=tk.LEFT, padx=(15, 5))
+
         self.status_filter_var = tk.StringVar(value="Активные")
         status_combo = ttk.Combobox(
             search_container,
             textvariable=self.status_filter_var,
             values=["Все", "Активные", "Выполненные"],
             state="readonly",
-            width=12,
+            width=10,
             font=TableView.LABEL_FONT
         )
-        status_combo.pack(side=tk.LEFT, padx=5, pady=Sizes.TOP_PANEL_PADDING_Y)
+        status_combo.pack(side=tk.LEFT, padx=5)
         status_combo.bind("<<ComboboxSelected>>", lambda e: self._refresh_data())
+
+        self.show_financial_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            self.top_panel,
+            text="Финансовые",
+            variable=self.show_financial_var,
+            command=self._refresh_data,
+            bg=TableView.TOP_PANEL_BG,
+            fg=TableView.LABEL_FG,
+            activebackground=TableView.TOP_PANEL_BG,
+            activeforeground=TableView.LABEL_FG,
+            selectcolor=TableView.TABLE_BG,
+            font=TableView.LABEL_FONT
+        ).pack(side=tk.LEFT, padx=(8, 0), pady=6)
 
     def _on_single_click(self, event):
         """Обрабатывает одинарный клик по таблице"""
@@ -392,6 +386,14 @@ class TasksView(TableViewTemplate):
                     tasks = [task for task in tasks if not task.completed]
                 elif filter_value == "Выполненные":
                     tasks = [task for task in tasks if task.completed]
+
+            # Финансовые задачи скрыты, пока не включён чекбокс.
+            show_financial = getattr(self, "show_financial_var", None)
+            if show_financial is not None and not show_financial.get():
+                tasks = [
+                    task for task in tasks
+                    if not getattr(task, "is_financial", False)
+                ]
             
             # Применяем сортировку
             if sort_by:

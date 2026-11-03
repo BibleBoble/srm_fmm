@@ -10,9 +10,15 @@ def show_document_input_dialog(
     title,
     fields,
     include_line_items=False,
-    open_client_folder=None
+    open_client_folder=None,
+    initial_values=None,
+    initial_line_items=None
 ):
-    """Собирает реквизиты и строки услуг перед предпросмотром документа."""
+    """Собирает реквизиты и строки услуг перед предпросмотром документа.
+
+    initial_values / initial_line_items позволяют открыть форму повторно
+    с уже введёнными данными, если при проверке нашлась ошибка.
+    """
     dialog = tk.Toplevel(parent)
     dialog.title(title)
     dialog.geometry("720x700")
@@ -39,6 +45,7 @@ def show_document_input_dialog(
     content.columnconfigure(1, weight=1)
 
     field_widgets = {}
+    initial_values = initial_values or {}
     for row_index, field in enumerate(fields):
         label = f"{field['label']}{' *' if field.get('required') else ''}"
         ttk.Label(content, text=label).grid(
@@ -48,19 +55,20 @@ def show_document_input_dialog(
             padx=(0, 12),
             pady=6
         )
+        value = initial_values.get(field["key"], field.get("value", ""))
         if field.get("choices"):
             widget = ttk.Combobox(
                 content,
                 values=field["choices"],
                 state="readonly"
             )
-            widget.set(field.get("value", ""))
+            widget.set(value)
         elif field.get("multiline"):
             widget = tk.Text(content, height=3, wrap=tk.WORD)
-            widget.insert("1.0", field.get("value", ""))
+            widget.insert("1.0", value)
         else:
             widget = ttk.Entry(content)
-            widget.insert(0, field.get("value", ""))
+            widget.insert(0, value)
         widget.grid(row=row_index, column=1, sticky="ew", pady=6)
         field_widgets[field["key"]] = widget
 
@@ -86,7 +94,7 @@ def show_document_input_dialog(
         line_frame.columnconfigure(1, weight=2)
         line_frame.columnconfigure(2, weight=2)
 
-        def add_line():
+        def add_line(initial=None):
             row_number = len(line_rows) + 1
             name = tk.Text(line_frame, width=30, height=5, wrap=tk.WORD)
             name.grid(row=row_number, column=0, sticky="ew", padx=3, pady=3)
@@ -94,6 +102,10 @@ def show_document_input_dialog(
             term.grid(row=row_number, column=1, sticky="ew", padx=3, pady=3)
             amount = ttk.Entry(line_frame, width=16)
             amount.grid(row=row_number, column=2, sticky="ew", padx=3, pady=3)
+            if initial is not None:
+                name.insert("1.0", str(initial.get("name", "")))
+                term.insert(0, str(initial.get("term", "")))
+                amount.insert(0, str(initial.get("amount", "")))
             widgets = [name, term, amount]
             remove_button = ttk.Button(
                 line_frame,
@@ -131,7 +143,11 @@ def show_document_input_dialog(
             sticky="w",
             pady=(0, 8)
         )
-        add_line()
+        if initial_line_items:
+            for item in initial_line_items:
+                add_line(item)
+        else:
+            add_line()
 
     result = {"value": None}
 

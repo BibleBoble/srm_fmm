@@ -4,20 +4,20 @@
 Рефакторинг: разделено на 3 класса (SRP)
 """
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
 from views.table_view_template import TableViewTemplate
 from views.calendar_view import CalendarDialog
-from views.client_list_view import ClientListView
 from views.client_card_view import ClientCardView
-from views.client_form_dialog import ClientFormDialog
 
-from utils.constants import Colors, TableView, Sizes
+from utils.client_card_reader import read_client_card
+from utils.constants import Colors, TableView
 from utils.formatters import DateFormatter, PriorityFormatter, StatusFormatter
 from utils.parsers import safe_get
 from datetime import date, datetime, timedelta
 from services.client_service import ClientService
 from services.task_service import TaskService
-from utils.ui_helpers import center_toplevel, confirm_close_on_focus_loss
+from utils.ui_helpers import center_toplevel
 
 
 def _copy_selected_tree_row(event):
@@ -367,10 +367,6 @@ class ClientTasksTable:
                 button.destroy()
                 del self._action_buttons[item_id]
     
-    def refresh(self):
-        """Обновляет таблицу задач"""
-        self._load_tasks()
-
     def _load_tasks(self):
         """Показывает задачи и комментарии клиента в единой ленте."""
         for item in self.tree.get_children():
@@ -471,22 +467,6 @@ class ClientTasksTable:
                 f"Не удалось завершить задачу:\n{error}",
                 parent=self.parent.winfo_toplevel()
             )
-    
-    def _toggle_status(self, task_id):
-        """Переключает статус задачи через TaskService"""
-        try:
-            # Используем TaskService для переключения статуса
-            self.task_service.toggle_task_status(task_id)
-
-            # Перезагружаем строки, чтобы пересчитать цвет и актуальность фильтра.
-            self._load_tasks()
-
-        except Exception as e:
-            print(f"Ошибка при обновлении статуса: {e}")
-    
-    def refresh(self):
-        """Обновляет таблицу задач"""
-        self._load_tasks()
     
     def _add_task(self):
         """Добавляет новую задачу для клиента"""
@@ -793,12 +773,6 @@ class ClientTasksTable:
                     # Обновляем таблицу
                     self._load_tasks()
 
-                    # Также обновляем вкладку задач в карточке клиента
-                    try:
-                        self._refresh_tasks_tab()
-                    except Exception as refresh_error:
-                        print(f"Предупреждение: не удалось обновить вкладку задач: {refresh_error}")
-
                 except ValueError as e:
                     messagebox.showerror("Ошибка валидации", str(e))
                 except Exception as e:
@@ -1008,22 +982,6 @@ class ClientTasksTable:
                     # Обновляем таблицу задач
                     self._load_tasks()
 
-                    # Также обновляем вкладку задач в карточке клиента
-                    parent_window = self.parent.winfo_toplevel()
-
-                    def find_clients_view(widget):
-                        if hasattr(widget, '_refresh_tasks_tab'):
-                            return widget
-                        for child in widget.winfo_children():
-                            result = find_clients_view(child)
-                            if result:
-                                return result
-                        return None
-
-                    clients_view = find_clients_view(parent_window)
-                    if clients_view:
-                        clients_view._refresh_tasks_tab(parent_window)
-
                 except ValueError as e:
                     from tkinter import messagebox
                     messagebox.showerror("Ошибка валидации", str(e))
@@ -1068,24 +1026,6 @@ class ClientTasksTable:
             from tkinter import messagebox
             messagebox.showerror("Ошибка", f"Не удалось открыть задачу: {e}")
 
-    def _open_task_card(self, task_id):
-        """Открывает карточку задачи"""
-        # Находим родительское окно и вызываем метод ClientsView
-        parent_window = self.parent.winfo_toplevel()
-        # Ищем экземпляр ClientsView в родительских виджетах
-        def find_clients_view(widget):
-            if hasattr(widget, '_open_task_card'):
-                return widget
-            for child in widget.winfo_children():
-                result = find_clients_view(child)
-                if result:
-                    return result
-            return None
-        
-        clients_view = find_clients_view(parent_window)
-        if clients_view:
-            clients_view._open_task_card(task_id, parent_window)
-    
     def refresh(self):
         """Обновляет данные в таблице"""
         self._load_tasks()
@@ -1333,9 +1273,6 @@ class ClientContactsTable:
         
         # Обновляем таблицу контактов после редактирования
         self.refresh()
-        
-        # Также обновляем вкладку контактов в карточке клиента
-        self.clients_view._refresh_contacts_tab()
     
     def refresh(self):
         """Обновляет данные в таблице"""
@@ -1372,13 +1309,14 @@ class ClientsView(TableViewTemplate):
         ("created_at:DESC", "По дате создания (старые)")
     ]
 
-    def __init__(self, parent_frame, clients_mgr, contact_persons_mgr, contact_emails_mgr, interactions_mgr, tasks_mgr=None):
+    def __init__(self, parent_frame, clients_mgr, contact_persons_mgr, contact_emails_mgr, interactions_mgr, tasks_mgr=None, document_service=None):
         super().__init__(parent_frame, clients_mgr)
         self.clients_mgr = clients_mgr
         self.contact_persons_mgr = contact_persons_mgr
         self.contact_emails_mgr = contact_emails_mgr
         self.interactions_mgr = interactions_mgr
         self.tasks_mgr = tasks_mgr
+        self.document_service = document_service
         
         # Инициализация сервиса
         self.client_service = ClientService(clients_mgr, contact_persons_mgr, contact_emails_mgr, interactions_mgr)
@@ -1387,7 +1325,6 @@ class ClientsView(TableViewTemplate):
         self.add_client_dialog = None
         self.edit_client_dialogs = {}  # client_id -> dialog
         self.client_card_dialogs = {}  # client_id -> dialog
-        self.task_card_dialogs = {}  # task_id -> dialog
         self.add_contact_dialogs = {}  # client_id -> dialog
 
     def _on_tree_enter(self, event):
@@ -1398,14 +1335,6 @@ class ClientsView(TableViewTemplate):
 
     def _on_tree_motion(self, event):
         pass
-
-    def _add_mouse_wheel_support(self, canvas):
-        """Добавить поддержку прокрутки колесиком мыши для canvas"""
-        def on_mouse_wheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mouse_wheel))
-        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
     def _create_table(self):
         """Создаёт Treeview таблицу с дополнительной обработкой клика на задачи"""
@@ -1480,140 +1409,6 @@ class ClientsView(TableViewTemplate):
             fixed_client_id=client_id,
             on_open_client=self._open_client_card_by_id
         )
-
-    def _legacy_create_task_for_client(self, client_id):
-        """Создает задачу для клиента из главного окна клиентов"""
-        try:
-            # Проверяем, что tasks_mgr инициализирован
-            if not self.tasks_mgr:
-                messagebox.showerror("Ошибка", "Менеджер задач не инициализирован")
-                return
-
-            task_window = tk.Toplevel(self.parent_frame)
-            task_window.title("➕ Новая задача")
-            task_window.geometry("600x550")
-            task_window.configure(bg='white')
-            task_window.resizable(False, False)
-            center_toplevel(task_window)
-            
-            # Делаем окно модальным и поверх родительского
-            task_window.transient(self.parent_frame.winfo_toplevel())
-            task_window.grab_set()
-            task_window.focus_set()
-
-            # Основная информация
-            main_frame = tk.Frame(task_window, bg='white')
-            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-            # Название
-            tk.Label(main_frame, text="📋 Основная информация", font=("Arial", 12, "bold"), bg='white', fg='#333').pack(anchor='w', pady=(0, 10))
-            
-            tk.Label(main_frame, text="Название задачи *", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
-            title_entry = tk.Entry(main_frame, font=("Arial", 11), width=50, relief="solid", borderwidth=1)
-            title_entry.pack(fill=tk.X, pady=(5, 15))
-
-            # Описание
-            tk.Label(main_frame, text="Описание", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
-            desc_text = tk.Text(main_frame, font=("Arial", 11), height=4, width=50, relief="solid", borderwidth=1)
-            desc_text.pack(fill=tk.X, pady=(5, 15))
-
-            # Клиент
-            tk.Label(main_frame, text="Клиент", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
-            client_frame = tk.Frame(main_frame, bg='white')
-            client_frame.pack(fill=tk.X, pady=(5, 15))
-            
-            # Получаем информацию о клиенте
-            client_info = self.clients_mgr.get_by_id(client_id)
-            client_name = client_info.get('company', 'Без названия') if client_info else 'Неизвестный клиент'
-            
-            client_var = tk.StringVar(value=client_name)
-            client_entry = tk.Entry(client_frame, textvariable=client_var, font=("Arial", 11), relief="solid", borderwidth=1)
-            client_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            client_entry.config(state='readonly')  # Делаем поле только для чтения
-
-            # Дополнительные параметры
-            tk.Label(main_frame, text="⚙ Дополнительные параметры", font=("Arial", 12, "bold"), bg='white', fg='#333').pack(anchor='w', pady=(0, 10))
-            
-            # Приоритет
-            tk.Label(main_frame, text="Приоритет", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
-            priority_var = tk.StringVar(value="Средний")
-            priority_combo = ttk.Combobox(main_frame, textvariable=priority_var,
-                                        values=["Низкий", "Средний", "Высокий"],
-                                        state="readonly", width=20)
-            priority_combo.pack(fill=tk.X, pady=(5, 15))
-
-            # Срок выполнения
-            tk.Label(main_frame, text="Срок выполнения", font=("Arial", 10, "bold"), bg='white', fg='#333').pack(anchor='w')
-            date_frame = tk.Frame(main_frame, bg='white')
-            date_frame.pack(fill=tk.X, pady=(5, 15))
-            
-            due_date_var = tk.StringVar(value=datetime.now().strftime("%d.%m.%Y"))
-            due_date_entry = tk.Entry(date_frame, textvariable=due_date_var, font=("Arial", 11), relief="solid", borderwidth=1)
-            due_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            
-            def show_calendar():
-                """Показать календарь для выбора даты"""
-                cal_dialog = CalendarDialog(task_window, "Выберите срок выполнения")
-                selected_date = cal_dialog.show()
-                if selected_date:
-                    due_date_var.set(selected_date.strftime("%d.%m.%Y"))
-            
-            tk.Button(
-                date_frame,
-                text="📅",
-                command=show_calendar,
-                bg="#41a5be",
-                fg="white",
-                font=("Arial", 10),
-                relief="flat",
-                cursor="hand2"
-            ).pack(side=tk.RIGHT, padx=(5, 0))
-
-            # Кнопки
-            buttons_frame = tk.Frame(main_frame, bg='white')
-            buttons_frame.pack(fill=tk.X, pady=(20, 0))
-
-            def save_task():
-                title = title_entry.get().strip()
-                if not title:
-                    messagebox.showerror("Ошибка", "Укажите название задачи")
-                    return
-
-                description = desc_text.get('1.0', tk.END).strip()
-                priority = priority_var.get()
-                due_date = due_date_var.get().strip()
-
-                # Создаем задачу через TaskService
-                try:
-                    task_service = TaskService(self.tasks_mgr, self.clients_mgr)
-                    task_data = {
-                        'title': title,
-                        'description': description,
-                        'client_id': client_id,
-                        'priority': priority,
-                        'due_date': due_date
-                    }
-                    task_service.create_task(task_data)
-
-                    task_window.destroy()
-                    # Обновляем таблицу клиентов
-                    self._refresh_data()
-                    messagebox.showinfo("Успех", "Задача успешно создана!")
-
-                except ValueError as e:
-                    messagebox.showerror("Ошибка валидации", str(e))
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось создать задачу: {e}")
-
-            tk.Button(buttons_frame, text="Сохранить", command=save_task,
-                     bg="#28a745", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=(0, 10))
-            tk.Button(buttons_frame, text="Отмена", command=task_window.destroy,
-                     bg="#6c757d", fg="white", font=("Arial", 11, "bold")).pack(side=tk.LEFT)
-
-            title_entry.focus_set()
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать задачу: {e}")
 
     def _get_data(self, page, search, sort_by, sort_order):
         """Загрузка данных с пагинацией и поиском"""
@@ -1761,6 +1556,92 @@ class ClientsView(TableViewTemplate):
             else:
                 values[field_name] = widget.get().strip()
         return values
+
+    def _load_client_card_into_form(
+        self, dialog, company_entry, address_entry, partner_fields
+    ):
+        """Выбрать карточку клиента и заполнить поля формы."""
+        downloads = Path.home() / "Downloads"
+        initial_dir = downloads if downloads.is_dir() else Path.home()
+        path = filedialog.askopenfilename(
+            parent=dialog,
+            title="Выберите карточку клиента",
+            initialdir=str(initial_dir),
+            filetypes=(
+                ("Документы Word", "*.docx *.doc"),
+                ("Все файлы", "*.*")
+            )
+        )
+        if not path:
+            return
+
+        try:
+            data = read_client_card(path)
+        except Exception as error:
+            messagebox.showerror(
+                "Карточка клиента",
+                f"Не удалось прочитать карточку:\n{error}",
+                parent=dialog
+            )
+            self._restore_client_dialog(dialog, company_entry)
+            return
+
+        filled = self._apply_client_card(
+            data, company_entry, address_entry, partner_fields
+        )
+        if not filled:
+            messagebox.showinfo(
+                "Карточка клиента",
+                "В карточке не найдены данные для заполнения.",
+                parent=dialog
+            )
+        else:
+            base_title = dialog.title().split(" — ")[0]
+            dialog.title(f"{base_title} — данные из {path.name}")
+
+        # Форма остаётся открытой: пользователь проверяет и дополняет поля.
+        self._restore_client_dialog(dialog, company_entry)
+
+    @staticmethod
+    def _restore_client_dialog(dialog, focus_widget=None):
+        """Вернуть фокус и модальность форме после системных диалогов."""
+        try:
+            dialog.deiconify()
+            dialog.lift()
+            dialog.focus_force()
+            dialog.grab_set()
+        except tk.TclError:
+            return
+        if focus_widget is not None:
+            focus_widget.focus_set()
+
+    @staticmethod
+    def _apply_client_card(data, company_entry, address_entry, partner_fields):
+        """Заполнить поля формы данными из карточки."""
+        filled = 0
+
+        def set_entry(widget, value):
+            nonlocal filled
+            if not value:
+                return
+            widget.delete(0, tk.END)
+            widget.insert(0, value)
+            filled += 1
+
+        set_entry(company_entry, data.get("company"))
+        set_entry(address_entry, data.get("address"))
+
+        for key, widget in partner_fields.items():
+            value = data.get(key)
+            if not value:
+                continue
+            if isinstance(widget, tk.Text):
+                widget.delete("1.0", tk.END)
+                widget.insert("1.0", value)
+                filled += 1
+            else:
+                set_entry(widget, value)
+        return filled
 
     def _show_add_client_dialog(self):
         """Диалог добавления клиента с расширенным функционалом"""
@@ -2145,6 +2026,20 @@ class ClientsView(TableViewTemplate):
             padx=40, pady=10
         ).pack(side=tk.LEFT, padx=10)
 
+        tk.Button(
+            buttons_frame,
+            text="📄 Карточка",
+            command=lambda: self._load_client_card_into_form(
+                dialog, company_entry, address_entry, partner_fields
+            ),
+            bg="#e9ecef",
+            fg=Colors.TEXT,
+            font=("Arial", 12, "bold"),
+            relief="flat",
+            cursor="hand2",
+            padx=40, pady=10
+        ).pack(side=tk.LEFT, padx=10)
+
         company_entry.focus_set()
 
     def _open_client_card_by_id(self, client_id):
@@ -2213,6 +2108,7 @@ class ClientsView(TableViewTemplate):
             contact_emails_mgr=self.contact_emails_mgr,
             tasks_mgr=self.tasks_mgr,
             interactions_mgr=self.interactions_mgr,
+            document_service=self.document_service,
             on_edit=lambda data, window: self._edit_client(data, window),
             on_delete=self._on_client_deleted,
             on_close=lambda: self._on_client_card_closed(client_id)
@@ -2238,631 +2134,9 @@ class ClientsView(TableViewTemplate):
         if client_id in self.client_card_dialogs:
             del self.client_card_dialogs[client_id]
 
-    def _add_info_row(self, parent, label, value, row):
-        """Добавить строку информации"""
-        tk.Label(
-            parent,
-            text=label,
-            font=("Arial", 12, "bold"),
-            bg='white'
-        ).grid(row=row, column=0, sticky='w', padx=10, pady=10)
-
-        tk.Label(
-            parent,
-            text=value,
-            font=("Arial", 12),
-            bg='white',
-            fg='#666'
-        ).grid(row=row, column=1, sticky='w', padx=10, pady=10)
-
-    def _create_main_tab(self, parent, client):
-        """Вкладка 'Основное'"""
-        tk.Label(
-            parent,
-            text="Основная информация",
-            font=("Arial", 16, "bold"),
-            bg='white'
-        ).pack(pady=20)
-
-        info_frame = tk.Frame(parent, bg='white')
-        info_frame.pack(padx=30, pady=10, fill=tk.BOTH)
-
-        # Компания
-        self._add_info_row(info_frame, "Компания:", client['company'], 0)
-
-        # Адрес
-        self._add_info_row(info_frame, "Адрес:", client['address'] or "Не указан", 1)
-
-        # Примечания
-        tk.Label(
-            info_frame,
-            text="Примечания:",
-            font=("Arial", 12, "bold"),
-            bg='white'
-        ).grid(row=2, column=0, sticky='nw', padx=10, pady=10)
-
-        notes_text = tk.Text(
-            info_frame,
-            width=50,
-            height=5,
-            font=("Arial", 11),
-            wrap=tk.WORD
-        )
-        notes_text.grid(row=2, column=1, sticky='w', padx=10, pady=10)
-        notes_text.insert('1.0', client['notes'] or "Нет примечаний")
-        notes_text.config(state='disabled')
-
-        # Дата создания
-        self._add_info_row(info_frame, "Дата создания:", client['created_at'], 3)
-
-    def _create_contacts_tab(self, parent, client_id):
-        """Вкладка 'Контактные лица' (табличное представление)"""
-        # Добавляем метку для идентификации вкладки
-        parent._is_contacts_tab = True
-        parent._client_id = client_id
-        
-        # Создаем таблицу контактов клиента
-        self.contacts_table = ClientContactsTable(parent, client_id, self.contact_persons_mgr, self.contact_emails_mgr, self)
-        
-        # Сохраняем ссылку на таблицу для обновления
-        parent._contacts_table = self.contacts_table
-
-    def _refresh_contacts_tab(self):
-        """Обновить вкладку контактов"""
-        try:
-            # Ищем открытую карточку клиента
-            for widget in self.parent_frame.winfo_children():
-                if hasattr(widget, '_is_client_card') and widget._is_client_card:
-                    # Ищем notebook в карточке клиента
-                    for child in widget.winfo_children():
-                        if isinstance(child, ttk.Notebook):
-                            # Ищем вкладку контактов
-                            for tab_idx in range(child.index("end")):
-                                tab = child.winfo_children()[tab_idx]
-                                if hasattr(tab, '_is_contacts_tab') and tab._is_contacts_tab:
-                                    # Обновляем таблицу контактов
-                                    contacts_table = getattr(tab, '_contacts_table', None)
-                                    if contacts_table:
-                                        contacts_table.refresh()
-                                    return
-                            break
-                    break
-        except Exception as e:
-            print(f"Ошибка обновления вкладки контактов: {e}")
-
-    def _create_tasks_tab(self, parent, client_id, card_window):
-        """Вкладка 'Задачи'"""
-        # Добавляем метку для идентификации вкладки
-        parent._is_tasks_tab = True
-        parent._client_id = client_id
-        parent._card_window = card_window  # Сохраняем ссылку на окно
-        
-        # Создаем таблицу задач клиента
-        self.tasks_table = ClientTasksTable(
-            parent,
-            client_id,
-            self.tasks_mgr,
-            self.clients_mgr,
-            self.interactions_mgr,
-            on_open_client=lambda selected_id: self._open_client_card_by_id(selected_id)
-        )
-        
-        # Сохраняем ссылку на таблицу для обновления
-        parent._tasks_table = self.tasks_table
-
-    def _refresh_tasks_table(self, parent_window):
-        """Обновить таблицу задач в карточке клиента"""
-        try:
-            # Ищем notebook в карточке клиента
-            notebook = None
-            for widget in parent_window.winfo_children():
-                if isinstance(widget, ttk.Notebook):
-                    notebook = widget
-                    break
-            
-            if notebook:
-                # Ищем вкладку "✅ Задачи"
-                for i in range(notebook.index("end")):
-                    tab_info = notebook.tab(i)
-                    tab_text = tab_info.get("text", "")
-                    if "Задачи" in tab_text:
-                        # Получаем виджет вкладки правильно
-                        tab_frames = notebook.winfo_children()
-                        if i < len(tab_frames):
-                            tab_frame = tab_frames[i]
-                            # Обновляем таблицу
-                            tasks_table = getattr(tab_frame, '_tasks_table', None)
-                            if tasks_table:
-                                tasks_table.refresh()
-                            return
-        except Exception as e:
-            print(f"Ошибка при обновлении таблицы задач: {e}")
-
-    def _open_task_card(self, task_id, parent_window):
-        """Открыть карточку задачи с возможностью отметить как выполненную"""
-        print(f"_open_task_card вызван с task_id={task_id}, parent_window={parent_window}, тип={type(parent_window)}")
-        
-        # Проверяем, не открыта ли уже карточка этой задачи
-        if task_id in self.task_card_dialogs:
-            existing_dialog = self.task_card_dialogs[task_id]
-            if existing_dialog and tk.Toplevel.winfo_exists(existing_dialog):
-                existing_dialog.lift()
-                existing_dialog.focus_force()
-                return
-            self.task_card_dialogs.pop(task_id, None)
-        
-        try:
-            if not self.tasks_mgr:
-                from tkinter import messagebox
-                messagebox.showerror("Ошибка", "Менеджер задач не инициализирован")
-                return
-
-            # Получаем данные задачи
-            task_data = self.tasks_mgr.get_by_id(task_id)
-            if not task_data:
-                from tkinter import messagebox
-                messagebox.showerror("Ошибка", f"Задача с ID {task_id} не найдена")
-                return
-
-            # Преобразуем данные задачи в словарь для удобной работы
-            if hasattr(task_data, '__dict__'):
-                # Если это объект с атрибутами
-                task_dict = {
-                    'id': getattr(task_data, 'id', task_id),
-                    'title': getattr(task_data, 'title', 'Без названия'),
-                    'status': getattr(task_data, 'status', 'Новая'),
-                    'priority': getattr(task_data, 'priority', 'Не указан'),
-                    'due_date': getattr(task_data, 'due_date', None),
-                    'created_at': getattr(task_data, 'created_at', 'Не указано'),
-                    'description': getattr(task_data, 'description', 'Нет описания')
-                }
-            elif isinstance(task_data, dict):
-                # Если это уже словарь
-                task_dict = task_data
-            else:
-                # Пробуем преобразовать в словарь
-                try:
-                    task_dict = dict(task_data)
-                except:
-                    task_dict = {
-                        'id': task_id,
-                        'title': str(task_data) if task_data else 'Без названия',
-                        'status': 'Новая',
-                        'priority': 'Не указан',
-                        'due_date': 'Не указан',
-                        'created_at': 'Не указано',
-                        'description': 'Нет описания'
-                    }
-
-            # Создаем окно карточки задачи
-            task_window = tk.Toplevel(self.parent_frame)
-            task_window.title(f"Задача: {task_dict['title']}")
-            task_window.geometry("600x500")
-            task_window.configure(bg='white')
-            task_window.resizable(False, False)
-            center_toplevel(task_window)
-            
-            # Сохраняем ссылку на окно
-            self.task_card_dialogs[task_id] = task_window
-            
-            # Очищаем ссылку при закрытии
-            def on_dialog_close():
-                if task_id in self.task_card_dialogs:
-                    del self.task_card_dialogs[task_id]
-                task_window.destroy()
-            
-            task_window.protocol("WM_DELETE_WINDOW", on_dialog_close)
-
-            # Заголовок
-            header = tk.Frame(task_window, bg='#333333', height=60)
-            header.pack(fill=tk.X)
-            header.pack_propagate(False)
-
-            tk.Label(
-                header,
-                text=f"📌 {task_dict['title']}",
-                font=("Arial", 18, "bold"),
-                fg="white",
-                bg='#333333'
-            ).pack(side=tk.LEFT, padx=20, pady=15)
-
-            tk.Label(
-                header,
-                text=f"ID: {task_id}",
-                font=("Arial", 12),
-                fg="#41a5be",
-                bg='#333333'
-            ).pack(side=tk.RIGHT, padx=20, pady=15)
-
-            # Основная информация
-            info_frame = tk.Frame(task_window, bg='white')
-            info_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
-
-            # Статус
-            current_status = (
-                "Выполнена"
-                if task_dict.get('status') == "Выполнена"
-                else "Активная"
-            )
-            tk.Label(
-                info_frame,
-                text="Статус:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=0, column=0, sticky='w', pady=5)
-
-            status_frame = tk.Frame(info_frame, bg='white')
-            status_frame.grid(row=0, column=1, sticky='w', pady=5)
-
-            status_var = tk.StringVar(value=current_status)
-            status_options = ["Активная", "Выполнена"]
-            
-            for option in status_options:
-                tk.Radiobutton(
-                    status_frame,
-                    text=option,
-                    variable=status_var,
-                    value=option,
-                    font=("Arial", 10),
-                    bg='white'
-                ).pack(side=tk.LEFT, padx=5)
-
-            # Приоритет
-            priority = task_dict['priority']
-            self._add_info_row(info_frame, "Приоритет:", priority, 1)
-
-            # Срок выполнения (редактируемый)
-            tk.Label(
-                info_frame,
-                text="Срок выполнения:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=2, column=0, sticky='w', pady=5)
-
-            due_date_frame = tk.Frame(info_frame, bg='white')
-            due_date_frame.grid(row=2, column=1, sticky='w', pady=5)
-
-            due_date_var = tk.StringVar(
-                value=DateFormatter.format_date(task_dict.get('due_date'))
-            )
-            due_date_entry = tk.Entry(due_date_frame, textvariable=due_date_var, font=("Arial", 11), width=15)
-            due_date_entry.pack(side=tk.LEFT)
-
-            def show_calendar():
-                """Показать календарь для выбора даты"""
-                cal_dialog = CalendarDialog(task_window, "Выберите срок выполнения")
-                selected_date = cal_dialog.show()
-                if selected_date:
-                    due_date_var.set(selected_date.strftime("%d.%m.%Y"))
-
-            tk.Button(
-                due_date_frame,
-                text="📅",
-                command=show_calendar,
-                bg="#41a5be",
-                fg="white",
-                font=("Arial", 10),
-                relief="flat",
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=(5, 0))
-
-            created_at = task_dict['created_at']
-            tk.Label(
-                info_frame,
-                text=f"создано {DateFormatter.format_date(created_at) or '—'}",
-                font=("Arial", 10),
-                fg=Colors.MUTED,
-                bg="white"
-            ).grid(row=4, column=1, sticky="w", pady=5)
-
-            quick_dates_frame = tk.Frame(info_frame, bg="white")
-            quick_dates_frame.grid(row=3, column=1, sticky="w", pady=5)
-            for label, days in (("Завтра", 1), ("Через 3 дня", 3), ("Через неделю", 7)):
-                tk.Button(
-                    quick_dates_frame,
-                    text=label,
-                    command=lambda offset=days: due_date_var.set(
-                        (date.today() + timedelta(days=offset)).strftime("%d.%m.%Y")
-                    ),
-                    bg=Colors.LIGHT,
-                    fg=Colors.TEXT,
-                    activebackground=Colors.BORDER,
-                    relief="flat",
-                    cursor="hand2",
-                    padx=8,
-                    pady=4
-                ).pack(side=tk.LEFT, padx=(0, 5))
-
-            # Описание
-            tk.Label(
-                info_frame,
-                text="Описание:",
-                font=("Arial", 12, "bold"),
-                bg='white'
-            ).grid(row=5, column=0, sticky='nw', pady=5)
-
-            desc_text = tk.Text(
-                info_frame,
-                width=40,
-                height=8,
-                font=("Arial", 10),
-                wrap=tk.WORD
-            )
-            desc_text.grid(row=5, column=1, sticky='w', pady=5)
-            desc_text.insert('1.0', task_dict['description'])
-            # Оставляем поле редактируемым
-
-            # Кнопки внизу
-            buttons_container = tk.Frame(task_window, bg='#f0f0f0', height=80)
-            buttons_container.pack(fill=tk.X, side=tk.BOTTOM)
-            buttons_container.pack_propagate(False)
-
-            buttons_frame = tk.Frame(buttons_container, bg='#f0f0f0')
-            buttons_frame.pack(pady=15)
-
-            def save_task():
-                """Сохранить изменения в задаче"""
-                try:
-                    print("Начинаем сохранение задачи...")
-                    new_status = status_var.get()
-                    new_description = desc_text.get('1.0', tk.END).strip()
-                    new_due_date = due_date_var.get().strip()
-                    print(f"Новый статус: {new_status}, новое описание: {new_description[:50]}..., новая дата: {new_due_date}")
-
-                    # Получаем текущие данные задачи
-                    current_task = self.tasks_mgr.get_by_id(task_id)
-                    if not current_task:
-                        messagebox.showerror("Ошибка", "Задача не найдена")
-                        return
-
-                    # Обновляем задачу через TaskService
-                    task_data = {
-                        'title': getattr(current_task, 'title', ''),
-                        'description': new_description,
-                        'status': new_status,
-                        'priority': getattr(current_task, 'priority', 'Средний'),
-                        'due_date': new_due_date,
-                        'client_id': getattr(current_task, 'client_id', None)
-                    }
-                    self.task_service.update_task(task_id, task_data)
-                    print("Задача обновлена через TaskService")
-
-                    messagebox.showinfo("Успех", f"Задача сохранена. Статус: {new_status}")
-                    on_dialog_close()
-
-                    # Обновляем таблицу задач в карточке клиента
-                    self._refresh_tasks_table(parent_window)
-
-                    # Поднимаем окно карточки клиента на передний план
-                    parent_window.lift()
-                    parent_window.focus_force()
-
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}")
-                    print(f"Ошибка при сохранении: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-            def mark_completed():
-                """Отметить задачу как выполненную"""
-                status_var.set("Выполнена")
-                save_task()
-
-            tk.Button(
-                buttons_frame,
-                text="💾 Сохранить",
-                command=save_task,
-                bg="#41a5be",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=10)
-
-            tk.Button(
-                buttons_frame,
-                text="✅ Выполнено",
-                command=mark_completed,
-                bg="#28a745",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=10)
-
-            tk.Button(
-                buttons_frame,
-                text="Закрыть",
-                command=task_window.destroy,
-                bg="#6c757d",
-                fg="white",
-                font=("Arial", 12, "bold"),
-                relief="flat",
-                width=15,
-                height=1,
-                cursor="hand2"
-            ).pack(side=tk.LEFT, padx=10)
-
-        except Exception as e:
-            print(f"Ошибка при открытии карточки задачи: {e}")
-            from tkinter import messagebox
-            messagebox.showerror("Ошибка", f"Не удалось открыть карточку задачи: {e}")
-
-    def _update_specific_task(self, parent_window, task_id, new_status):
-        """Обновить только конкретную задачу в карточке клиента без пересоздания вкладки"""
-        try:
-            print(f"Ищем задачу {task_id} для обновления статуса на '{new_status}'")
-            
-            # Ищем notebook в карточке клиента
-            notebook = None
-            for widget in parent_window.winfo_children():
-                if isinstance(widget, ttk.Notebook):
-                    notebook = widget
-                    print("Найден notebook")
-                    break
-            
-            if notebook:
-                # Ищем вкладку "✅ Задачи"
-                for i in range(notebook.index("end")):
-                    tab_info = notebook.tab(i)
-                    tab_text = tab_info.get("text", "")
-                    print(f"Вкладка {i}: '{tab_text}'")
-                    if "Задачи" in tab_text:
-                        # Получаем виджет вкладки правильно
-                        tab_frames = notebook.winfo_children()
-                        if i < len(tab_frames):
-                            tab_frame = tab_frames[i]
-                            print(f"Получен фрейм вкладки: {tab_frame}")
-                            
-                            # Используем сохраненное card_window из вкладки
-                            card_window = getattr(tab_frame, '_card_window', None)
-                            if card_window:
-                                print(f"Используем сохраненное card_window: {card_window}")
-                                # Ищем и обновляем задачу
-                                self._find_and_update_task(card_window, task_id, new_status)
-                            else:
-                                print("card_window не найден во вкладке!")
-                            return
-            print("Не удалось найти задачу для обновления")
-        except Exception as e:
-            print(f"Ошибка при обновлении конкретной задачи: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def _find_and_update_task(self, card_window, task_id, new_status):
-        """Найти и обновить конкретную задачу в окне"""
-        try:
-            print(f"Поиск задачи {task_id} в окне {card_window}")
-            
-            # Ищем notebook в карточке клиента
-            notebook = None
-            for widget in card_window.winfo_children():
-                if isinstance(widget, ttk.Notebook):
-                    notebook = widget
-                    print("Найден notebook в card_window")
-                    break
-            
-            if notebook:
-                # Ищем вкладку "✅ Задачи"
-                for i in range(notebook.index("end")):
-                    tab_info = notebook.tab(i)
-                    tab_text = tab_info.get("text", "")
-                    if "Задачи" in tab_text:
-                        # Получаем виджет вкладки правильно
-                        tab_frames = notebook.winfo_children()
-                        if i < len(tab_frames):
-                            tab_frame = tab_frames[i]
-                            
-                            # Ищем canvas в вкладке задач
-                            for widget in tab_frame.winfo_children():
-                                if isinstance(widget, tk.Canvas):
-                                    # Ищем фрейм задачи по ID
-                                    for child in widget.winfo_children():
-                                        if isinstance(child, tk.Frame) and hasattr(child, '_task_id'):
-                                            if getattr(child, '_task_id') == task_id:
-                                                print("Найден нужный фрейм задачи!")
-                                                # Обновляем статус в виджете
-                                                self._update_task_status_in_widget(child, new_status)
-                                                print("Статус обновлен успешно!")
-                                                return
-                        return
-            print("Задача не найдена для обновления")
-        except Exception as e:
-            print(f"Ошибка при поиске и обновлении задачи: {e}")
-
-    def _update_task_status_in_widget(self, task_frame, new_status):
-        """Обновить статус в конкретном виджете задачи"""
-        try:
-            print(f"Обновляем статус в виджете: {new_status}")
-            # Ищем метку статуса в фрейме задачи
-            for widget in task_frame.winfo_children():
-                print(f"Проверяем виджет в фрейме: {widget}, тип: {type(widget)}")
-                if isinstance(widget, tk.Frame):
-                    print("Найден внутренний фрейм")
-                    # Ищем в дочерних элементах
-                    for child in widget.winfo_children():
-                        print(f"Проверяем дочерний элемент: {child}, тип: {type(child)}, hasattr _is_status_label: {hasattr(child, '_is_status_label')}")
-                        if isinstance(child, tk.Label) and hasattr(child, '_is_status_label'):
-                            print("Найдена метка статуса!")
-                            # Обновляем текст и цвет статуса
-                            status_colors = {
-                                'Новая': '#17a2b8',
-                                'В работе': '#007bff', 
-                                'Выполнена': '#28a745',
-                                'Отложена': '#6c757d',
-                                'Отменена': '#dc3545'
-                            }
-                            
-                            old_text = child.cget("text")
-                            old_bg = child.cget("bg")
-                            print(f"Старый статус: '{old_text}', старый цвет: {old_bg}")
-                            
-                            child.config(
-                                text=new_status,
-                                bg=status_colors.get(new_status, '#6c757d')
-                            )
-                            
-                            new_text = child.cget("text")
-                            new_bg = child.cget("bg")
-                            print(f"Новый статус: '{new_text}', новый цвет: {new_bg}")
-                            return
-            print("Метка статуса не найдена во фрейме")
-        except Exception as e:
-            print(f"Ошибка при обновлении статуса в виджете: {e}")
-            import traceback
-            traceback.print_exc()
-
-    def _refresh_tasks_tab(self, parent_window=None):
-        """Обновить вкладку задач в карточке клиента"""
-        try:
-            if parent_window is None:
-                # Ищем открытую карточку клиента
-                for widget in self.parent_frame.winfo_children():
-                    if hasattr(widget, '_is_client_card') and widget._is_client_card:
-                        parent_window = widget
-                        break
-            
-            if parent_window is None:
-                return
-                
-            # Ищем notebook в карточке клиента
-            notebook = None
-            for widget in parent_window.winfo_children():
-                if isinstance(widget, ttk.Notebook):
-                    notebook = widget
-                    break
-            
-            if notebook:
-                # Ищем вкладку "✅ Задачи"
-                for i in range(notebook.index("end")):
-                    tab_info = notebook.tab(i)
-                    tab_text = tab_info.get("text", "")
-                    if "Задачи" in tab_text:
-                        # Получаем tab_id
-                        tab_id = notebook.tab(i, "text")
-                        # Получаем вкладку
-                        tab_frame = notebook.nametowidget(tab_id)
-                        # Получаем client_id из метки
-                        client_id = getattr(tab_frame, '_client_id', None)
-                        if client_id:
-                            # Очищаем и пересоздаем вкладку задач
-                            for tab_child in tab_frame.winfo_children():
-                                tab_child.destroy()
-                            self._create_tasks_tab(tab_frame, client_id)
-                        return
-        except Exception as e:
-            print(f"Ошибка при обновлении вкладки задач: {e}")
-            import traceback
-            traceback.print_exc()
-
     def _add_contact_to_client(self, client_id, parent_window=None):
         """Открыть диалог добавления контактного лица для клиента"""
         try:
-            from tkinter import simpledialog
             dialog = tk.Toplevel(parent_window or self.parent_frame)
             dialog.title("Добавить контакт")
             dialog.transient(parent_window or self.parent_frame)
@@ -2956,8 +2230,6 @@ class ClientsView(TableViewTemplate):
                     messagebox.showinfo("Успех", "Контакт обновлён")
                     dialog.destroy()
                     self._refresh_data()
-                    # Обновляем вкладку контактов в карточке клиента если она открыта
-                    self._refresh_contacts_tab_in_card()
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось обновить контакт:\n{e}")
 
@@ -2969,37 +2241,6 @@ class ClientsView(TableViewTemplate):
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть диалог редактирования контакта:\n{e}")
-
-    def _refresh_contacts_tab(self):
-        """Обновить вкладку контактов в открытой карточке клиента (если есть)"""
-        try:
-            # Простая реализация: перезагрузим основной список клиентов
-            self._refresh_data()
-        except Exception:
-            pass
-
-    def _refresh_contacts_tab_in_card(self):
-        """Обновить таблицу контактов в открытой карточке клиента"""
-        try:
-            # Ищем открытую карточку клиента
-            for widget in self.parent_frame.winfo_children():
-                if hasattr(widget, '_is_client_card') and widget._is_client_card:
-                    # Ищем notebook в карточке клиента
-                    for child in widget.winfo_children():
-                        if isinstance(child, ttk.Notebook):
-                            # Ищем вкладку контактов
-                            for tab_idx in range(child.index("end")):
-                                tab = child.winfo_children()[tab_idx]
-                                if hasattr(tab, '_is_contacts_tab') and tab._is_contacts_tab:
-                                    # Обновляем таблицу контактов
-                                    contacts_table = getattr(tab, '_contacts_table', None)
-                                    if contacts_table:
-                                        contacts_table.refresh()
-                                    return
-                            break
-                    break
-        except Exception as e:
-            print(f"Ошибка обновления вкладки контактов: {e}")
 
     def _edit_client(self, client, parent_window):
         """Диалог редактирования клиента с контактами"""
@@ -3306,6 +2547,18 @@ class ClientsView(TableViewTemplate):
             command=dialog.destroy,
             bg="#6c757d",
             fg="white",
+            font=("Arial", 12, "bold"),
+            padx=40, pady=10
+        ).pack(side=tk.LEFT, padx=10)
+
+        tk.Button(
+            buttons_frame,
+            text="📄 Карточка",
+            command=lambda: self._load_client_card_into_form(
+                dialog, company_entry, address_entry, partner_fields
+            ),
+            bg="#e9ecef",
+            fg="#212529",
             font=("Arial", 12, "bold"),
             padx=40, pady=10
         ).pack(side=tk.LEFT, padx=10)

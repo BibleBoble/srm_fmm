@@ -1,7 +1,6 @@
 """
 Базовый класс для всех представлений (разделов приложения)
 """
-import tkinter as tk
 from utils.helpers import clear_frame
 
 

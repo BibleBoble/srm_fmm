@@ -1,40 +1,56 @@
-# managers/contracts_manager.py
-"""
-Менеджер для работы с договорами в БД
-"""
+"""Работа с договорами клиента в базе данных."""
+from datetime import date
+
 from managers.database import Database
 
 
 class ContractsManager:
-    """Класс для управления договорами"""
+    """Сохраняет и читает договоры, чтобы не вводить дату вручную."""
 
     def __init__(self):
         self.db = Database()
 
-    def add(self, client_id, number, date, amount):
-        """Добавить договор"""
-        query = """
-            INSERT INTO contracts (client_id, number, date, amount) 
-            VALUES (?, ?, ?, ?)
+    def save_contract(self, client_id, contract_date, amount=None, number_id=None):
+        """Сохранить дату договора клиента.
+
+        Дата обновляется, если договор этого клиента уже есть, поэтому
+        повторное создание документа не плодит дубликаты.
         """
-        return self.db.execute(query, (client_id, number, date, amount))
+        number = self._contract_number(
+            number_id if number_id is not None else client_id,
+            contract_date
+        )
+        existing = self.db.fetch_one(
+            "SELECT id FROM contracts WHERE client_id = ? AND number = ?",
+            (client_id, number),
+        )
+        if existing:
+            self.db.execute(
+                "UPDATE contracts SET date = ?, amount = ? WHERE id = ?",
+                (contract_date.isoformat(), amount, existing["id"]),
+            )
+            return existing["id"]
 
-    def get_all(self):
-        """Получить все договора"""
-        query = """
-            SELECT c.*, cl.company as client_name  # ← ИЗМЕНИТЬ 'name' на 'company'
-            FROM contracts c
-            LEFT JOIN clients cl ON c.client_id = cl.id
-            ORDER BY c.date DESC
-        """
-        return self.db.fetch_all(query)
+        return self.db.execute(
+            "INSERT INTO contracts (client_id, number, date, amount) "
+            "VALUES (?, ?, ?, ?)",
+            (client_id, number, contract_date.isoformat(), amount),
+        )
 
-    def get_by_client(self, client_id):
-        """Получить договора клиента"""
-        query = "SELECT * FROM contracts WHERE client_id = ? ORDER BY date DESC"
-        return self.db.fetch_all(query, (client_id,))
+    def get_last_contract_date(self, client_id):
+        """Вернуть дату последнего договора клиента или None."""
+        row = self.db.fetch_one(
+            "SELECT date FROM contracts WHERE client_id = ? "
+            "ORDER BY date DESC, id DESC LIMIT 1",
+            (client_id,),
+        )
+        if not row or not row["date"]:
+            return None
+        try:
+            return date.fromisoformat(str(row["date"])[:10])
+        except ValueError:
+            return None
 
-    def delete(self, contract_id):
-        """Удалить договор"""
-        query = "DELETE FROM contracts WHERE id = ?"
-        self.db.execute(query, (contract_id,))
+    @staticmethod
+    def _contract_number(client_id, contract_date):
+        return f"{client_id}-{contract_date:%Y%m%d}"

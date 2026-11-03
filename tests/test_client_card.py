@@ -9,7 +9,6 @@ from tkinter import ttk
 import sys
 import os
 import tempfile
-import sqlite3
 
 # Добавляем корень проекта в путь
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

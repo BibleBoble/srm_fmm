@@ -90,6 +90,50 @@ class PythonDocumentGeneratorTests(unittest.TestCase):
         self.assertEqual(highlighted.font.highlight_color, WD_COLOR_INDEX.YELLOW)
         generator.close()
 
+    def test_render_is_reused_when_saving(self):
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.docx"
+            document = Document()
+            document.add_paragraph("[name]")
+            document.save(template)
+
+            generator = PythonDocumentGenerator(template, {"[name]": "ООО Тест"})
+            data = generator.render()
+            target = Path(directory) / "result.docx"
+            generator.save_docx(target)
+
+            self.assertEqual(target.read_bytes(), data)
+            self.assertIs(generator.render(), data)
+            self.assertIn("ООО Тест", Document(target).paragraphs[0].text)
+
+    def test_unknown_placeholder_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.docx"
+            document = Document()
+            document.add_paragraph("[name] [unknown]")
+            document.save(template)
+
+            generator = PythonDocumentGenerator(template, {"[name]": "ООО Тест"})
+
+            with self.assertRaises(ValueError) as raised:
+                generator.render()
+            self.assertIn("[unknown]", str(raised.exception))
+
+    def test_save_docx_does_not_overwrite_existing_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.docx"
+            document = Document()
+            document.add_paragraph("[name]")
+            document.save(template)
+            target = Path(directory) / "result.docx"
+            target.write_bytes(b"existing")
+
+            generator = PythonDocumentGenerator(template, {"[name]": "ООО Тест"})
+
+            with self.assertRaises(FileExistsError):
+                generator.save_docx(target)
+            self.assertEqual(target.read_bytes(), b"existing")
+
 
 if __name__ == "__main__":
     unittest.main()

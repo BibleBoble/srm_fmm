@@ -2,7 +2,7 @@
 Менеджер для работы с задачами в БД
 """
 from managers.database import Database
-from datetime import date, datetime
+from datetime import date
 from models.task import Task
 from utils.formatters import StatusFormatter
 
@@ -12,12 +12,19 @@ class TasksManager:
     def __init__(self):
         self.db = Database()
 
-    def add(self, title, description="", due_date=None, client_id=None, priority="Средний"):
+    def add(self, title, description="", due_date=None, client_id=None,
+            priority="Средний", is_financial=0, work_id=None):
         query = """
-            INSERT INTO tasks (title, description, due_date, client_id, priority, completed) 
-            VALUES (?, ?, ?, ?, ?, 0)
+            INSERT INTO tasks
+                (title, description, due_date, client_id, priority,
+                 is_financial, work_id, completed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
         """
-        return self.db.execute(query, (title, description, due_date, client_id, priority))
+        return self.db.execute(
+            query,
+            (title, description, due_date, client_id, priority,
+             int(bool(is_financial)), work_id)
+        )
 
     def get_all(self, filter_type="all"):
         """

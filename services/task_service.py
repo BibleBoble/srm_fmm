@@ -3,7 +3,7 @@
 Бизнес-сервис для операций с задачами
 """
 from datetime import date, datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 
 class TaskService:

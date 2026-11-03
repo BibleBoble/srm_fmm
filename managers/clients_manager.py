@@ -196,6 +196,13 @@ class ClientsManager:
             )
         )
 
+    def set_signature_position(self, client_id, position):
+        """Запомнить должность подписанта, выбранную при создании договора."""
+        self.db.execute(
+            "UPDATE clients SET signature_position = ? WHERE id = ?",
+            (position, client_id),
+        )
+
     def delete(self, client_id):
         """
         Удалить клиента.

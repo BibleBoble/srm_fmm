@@ -68,41 +68,6 @@ class ContactPersonsManager:
         """
         return self.db.fetch_all(query, (client_id,))
 
-    def get_by_client_with_emails(self, client_id):
-        """
-        Получить все контактные лица клиента с их email.
-
-        Args:
-            client_id: int - ID клиента
-
-        Returns:
-            list - список контактов с полями 'emails'
-        """
-        contacts = self.get_by_client(client_id)
-        if not contacts:
-            return []
-
-        result = []
-        # Импортируем здесь, чтобы избежать циклических импортов
-        try:
-            from managers.contact_emails_manager import ContactEmailsManager
-            emails_mgr = ContactEmailsManager()
-        except ImportError:
-            # Если менеджер email еще не создан, возвращаем контакты без email
-            for contact in contacts:
-                contact_dict = dict(contact)
-                contact_dict['emails'] = []
-                result.append(contact_dict)
-            return result
-
-        for contact in contacts:
-            contact_dict = dict(contact)
-            emails = emails_mgr.get_by_contact(contact_dict['id'])
-            contact_dict['emails'] = emails
-            result.append(contact_dict)
-
-        return result
-
     def get_primary(self, client_id):
         """
         Получить основное контактное лицо клиента.
@@ -120,33 +85,6 @@ class ContactPersonsManager:
         """
         row = self.db.fetch_one(query, (client_id,))
         return dict(row) if row else None
-
-    def get_with_emails(self, contact_person_id):
-        """
-        Получить контактное лицо со всеми его email.
-
-        Args:
-            contact_person_id: int - ID контактного лица
-
-        Returns:
-            dict - данные контакта с полем 'emails'
-        """
-        # Получаем базовые данные контакта
-        query = "SELECT * FROM contact_persons WHERE id = ?"
-        contact = self.db.fetch_one(query, (contact_person_id,))
-
-        if not contact:
-            return None
-
-        result = dict(contact)
-
-        # Получаем email контакта
-        from managers.contact_emails_manager import ContactEmailsManager
-        emails_mgr = ContactEmailsManager()
-        emails = emails_mgr.get_by_contact(contact_person_id)
-        result['emails'] = emails
-
-        return result
 
     def get_by_client_with_emails(self, client_id):
         """

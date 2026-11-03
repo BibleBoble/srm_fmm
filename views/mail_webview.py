@@ -1,4 +1,4 @@
-"""Отдельный Qt WebEngine процесс для вкладки Яндекс.Почты."""
+"""Отдельный процесс Qt WebEngine для встроенной Яндекс.Почты."""
 import ctypes
 import os
 import queue
@@ -9,6 +9,15 @@ from urllib.parse import urlsplit
 
 
 MAIL_URL = "https://mail.yandex.ru"
+
+# Обычный десктопный User-Agent: Яндекс корректно отдаёт полную версию
+# интерфейса и не показывает предупреждение о неподдерживаемом браузере.
+DESKTOP_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
 WS_CHILD = 0x40000000
 WS_POPUP = 0x80000000
 WS_CAPTION = 0x00C00000
@@ -39,7 +48,7 @@ def _read_commands(commands):
         try:
             if command in {"show", "hide", "refresh", "quit"} and len(parts) == 1:
                 commands.put((command,))
-            elif command == "resize" and len(parts) == 3:
+            elif command in {"show", "resize"} and len(parts) == 3:
                 commands.put((command, int(parts[1]), int(parts[2])))
         except ValueError:
             continue
@@ -64,7 +73,7 @@ def _window_style_api(user32, kernel32):
 
 
 def _embed_window(native_handle, parent_handle, width, height):
-    """Reparents the Qt top-level HWND into the Tk mail host."""
+    """Встраивает окно Qt в указанный родительский контейнер Tk."""
     if sys.platform != "win32":
         raise OSError("Встраивание почты поддерживается только в Windows.")
 
@@ -124,7 +133,7 @@ def _resize_window(user32, native_handle, width, height, frame_changed=False):
 
 
 def _show_window(user32, native_handle, width, height):
-    """Sizes and shows the embedded browser without taking application focus."""
+    """Показывает встроенный браузер, не забирая фокус у приложения."""
     if not user32.SetWindowPos(
         ctypes.c_void_p(native_handle),
         ctypes.c_void_p(HWND_TOP),
@@ -137,12 +146,48 @@ def _show_window(user32, native_handle, width, height):
         raise ctypes.WinError()
 
 
+def _focus_window(native_handle):
+    """Передаёт клавиатурный фокус окну браузера (для Ctrl+C / Ctrl+V)."""
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    user32.GetWindowThreadProcessId.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_ulong)
+    ]
+    user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+    user32.AttachThreadInput.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.c_bool
+    ]
+    user32.SetFocus.argtypes = [ctypes.c_void_p]
+    user32.SetFocus.restype = ctypes.c_void_p
+
+    current_thread = kernel32.GetCurrentThreadId()
+    foreground = user32.GetForegroundWindow()
+    foreground_thread = (
+        user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    )
+    attached = False
+    if foreground_thread and foreground_thread != current_thread:
+        attached = bool(
+            user32.AttachThreadInput(current_thread, foreground_thread, True)
+        )
+    try:
+        user32.SetFocus(ctypes.c_void_p(native_handle))
+    finally:
+        if attached:
+            user32.AttachThreadInput(current_thread, foreground_thread, False)
+
+
 def _page_host(url):
     return urlsplit(url).hostname or "неизвестный адрес"
 
 
 def _create_browser(app, width, height, storage_path):
-    """Creates a persistent Chromium profile and the embedded browser widget."""
+    """Создаёт постоянный профиль Chromium и встроенный браузер."""
     from PySide6.QtCore import QUrl, Qt
     from PySide6.QtWidgets import QVBoxLayout, QWidget
     from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
@@ -154,15 +199,18 @@ def _create_browser(app, width, height, storage_path):
     profile.setPersistentCookiesPolicy(
         QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies
     )
+    profile.setHttpUserAgent(DESKTOP_USER_AGENT)
 
     container = QWidget()
     container.setWindowTitle("Яндекс.Почта")
     container.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+    container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     container.setGeometry(0, 0, max(width, 1), max(height, 1))
 
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     browser = QWebEngineView(container)
+    browser.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     browser.setPage(QWebEnginePage(profile, browser))
     layout.addWidget(browser)
 
@@ -187,10 +235,26 @@ def _create_browser(app, width, height, storage_path):
     container.winId()
     app.processEvents()
     browser.setUrl(QUrl(MAIL_URL))
+    browser.setFocus()
     return container, browser
 
 
-def _run_commands(app, container, native_handle, commands):
+def _install_focus_assist(app, native_handle):
+    """По клику в браузере передаёт ему клавиатурный фокус."""
+    from PySide6.QtCore import QEvent, QObject
+
+    class _FocusAssist(QObject):
+        def eventFilter(self, watched, event):
+            if event.type() == QEvent.Type.MouseButtonPress:
+                _focus_window(native_handle)
+            return False
+
+    helper = _FocusAssist(app)
+    app.installEventFilter(helper)
+    return helper
+
+
+def _run_commands(app, container, browser, native_handle, commands):
     user32 = ctypes.windll.user32
     current_width = max(container.width(), 1)
     current_height = max(container.height(), 1)
@@ -206,6 +270,9 @@ def _run_commands(app, container, native_handle, commands):
                 app.quit()
                 return
             if command[0] == "show":
+                if len(command) == 3:
+                    current_width, current_height = command[1:]
+                    container.resize(current_width, current_height)
                 container.show()
                 app.processEvents()
                 container.update()
@@ -216,6 +283,8 @@ def _run_commands(app, container, native_handle, commands):
                     current_width,
                     current_height
                 )
+                browser.setFocus()
+                _focus_window(native_handle)
             elif command[0] == "hide":
                 container.hide()
                 user32.ShowWindow(ctypes.c_void_p(native_handle), SW_HIDE)
@@ -270,14 +339,17 @@ def main():
         print("ERROR: В Windows не задан путь LOCALAPPDATA.", flush=True)
         return
 
+    # Постоянный профиль: cookies и сессия Яндекс.Почты сохраняются между
+    # запусками приложения, поэтому входить заново не требуется.
     storage_path = Path(local_app_data) / "SRM FMM" / "mail-profile-qt"
     try:
         storage_path.mkdir(parents=True, exist_ok=True)
         app = QApplication(sys.argv[:1])
         app.setQuitOnLastWindowClosed(False)
-        container, _ = _create_browser(app, width, height, storage_path)
+        container, browser = _create_browser(app, width, height, storage_path)
         native_handle = int(container.winId())
         _embed_window(native_handle, parent_handle, width, height)
+        focus_assist = _install_focus_assist(app, native_handle)
 
         commands = queue.Queue()
         threading.Thread(
@@ -287,12 +359,15 @@ def main():
         ).start()
         timer = QTimer()
         timer.timeout.connect(
-            lambda: _run_commands(app, container, native_handle, commands)
+            lambda: _run_commands(
+                app, container, browser, native_handle, commands
+            )
         )
         timer.start(30)
         print("READY", flush=True)
         app.exec()
         container.close()
+        del focus_assist
     except Exception as error:
         print(f"ERROR: {error}", flush=True)
 

@@ -14,36 +14,6 @@ def clear_frame(frame):
         widget.destroy()
 
 
-def validate_phone(phone):
-    """
-    Проверка корректности номера телефона.
-
-    Args:
-        phone: str - номер телефона
-
-    Returns:
-        bool - True если телефон корректный
-    """
-    import re
-    pattern = r'^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,9}$'
-    return bool(re.match(pattern, phone))
-
-
-def validate_email(email):
-    """
-    Проверка корректности email.
-
-    Args:
-        email: str - email адрес
-
-    Returns:
-        bool - True если email корректный
-    """
-    import re
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
-
-
 def show_message(parent, title, message, msg_type="info"):
     """
     Показать сообщение без системного звука

@@ -18,8 +18,86 @@ class SpecificationSummary:
     total: Decimal
 
 
+# Кэш разобранных спецификаций: путь + размер + mtime -> (позиции, итог).
+_CACHE = {}
+_CACHE_LIMIT = 256
+
+
+def read_specification_items(path):
+    """Прочитать таблицу услуг: наименование, срок и сумму по каждой строке."""
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError as error:
+        raise ValueError(f"Не удалось прочитать файл спецификации: {path.name}") from error
+
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    cached = _CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    items, total = _read_items(path)
+    if len(_CACHE) >= _CACHE_LIMIT:
+        _CACHE.clear()
+    _CACHE[key] = (items, total)
+    return items, total
+
+
 def read_specification_summary(path: Path) -> SpecificationSummary:
     """Прочитать наименования услуг и итоговую сумму из таблицы DOCX."""
+    items, total = read_specification_items(path)
+    return SpecificationSummary(tuple(item["name"] for item in items), total)
+
+
+def read_specification_customer(path):
+    """Данные заказчика из строки «Заказчик: ... в лице ...»."""
+    text = _document_text(path)
+    match = re.search(
+        r"Заказчик:\s*(.+?),\s*в лице\s+(.+?)(?:,\s*действующ|$)",
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+    if not match:
+        return {}
+
+    company = " ".join(match.group(1).split())
+    person_part = " ".join(match.group(2).split())
+    result = {
+        "company": company,
+        "position_genitive": "",
+        "person_genitive": person_part,
+    }
+    position = re.match(
+        r"(.+?(?:директора|предпринимателя|президента))\s+(.+)$",
+        person_part,
+        re.IGNORECASE
+    )
+    if position:
+        result["position_genitive"] = position.group(1).strip()
+        result["person_genitive"] = position.group(2).strip()
+    return result
+
+
+def _document_text(path):
+    path = Path(path)
+    try:
+        with ZipFile(path) as document:
+            xml_content = document.read("word/document.xml")
+    except (OSError, KeyError, BadZipFile) as error:
+        raise ValueError(f"Не удалось прочитать файл спецификации: {path.name}") from error
+
+    try:
+        document_root = ElementTree.fromstring(xml_content)
+    except ElementTree.ParseError as error:
+        raise ValueError(f"Повреждён файл спецификации: {path.name}") from error
+
+    return " ".join(
+        (text_node.text or "")
+        for text_node in document_root.iter(f"{_WORD_NAMESPACE}t")
+    )
+
+
+def _read_items(path: Path):
     try:
         with ZipFile(path) as document:
             xml_content = document.read("word/document.xml")
@@ -32,8 +110,7 @@ def read_specification_summary(path: Path) -> SpecificationSummary:
         raise ValueError(f"Повреждён файл спецификации: {path.name}") from error
 
     for table in document_root.iter(f"{_WORD_NAMESPACE}tbl"):
-        service_names = []
-        service_total = Decimal("0.00")
+        items = []
         total_rows = []
 
         for row in table.findall(f"{_WORD_NAMESPACE}tr"):
@@ -52,12 +129,20 @@ def read_specification_summary(path: Path) -> SpecificationSummary:
                 and re.fullmatch(r"\d+[.)]?", cells[0].strip())
                 and cells[1].strip()
             ):
-                service_names.append(cells[1].strip())
-                service_total += _parse_amount(cells[-1]) or Decimal("0.00")
+                items.append({
+                    "name": cells[1].strip(),
+                    "term": cells[2].strip(),
+                    "amount": _parse_amount(cells[-1]) or Decimal("0.00"),
+                })
 
-        if service_names:
-            total = _read_total(total_rows) or service_total
-            return SpecificationSummary(tuple(service_names), total)
+        if items:
+            total = _read_total(total_rows)
+            if total is None:
+                total = sum(
+                    (item["amount"] for item in items),
+                    Decimal("0.00")
+                )
+            return items, total
 
     raise ValueError(f"В спецификации {path.name} не найдена таблица услуг.")
 

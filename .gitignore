@@ -17,6 +17,7 @@ test_backup.db
 # Logs and backups
 logs/
 backups/
+reservwork/
 
 # IDE
 .vscode/

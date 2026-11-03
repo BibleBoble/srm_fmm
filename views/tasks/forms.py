@@ -473,6 +473,53 @@ class TaskFormDialog:
                 pady=8
             ).pack(side=tk.RIGHT, padx=(0, 10))
 
+        if self.task is not None and getattr(self.task, "is_financial", False):
+            tk.Button(
+                buttons,
+                text="💰 Расходы",
+                command=self._open_expenses,
+                bg="#b45309",
+                fg=Colors.WHITE,
+                activebackground="#92400e",
+                relief="flat",
+                cursor="hand2",
+                padx=16,
+                pady=8
+            ).pack(side=tk.RIGHT, padx=(0, 10))
+
+    def _open_expenses(self):
+        """Открыть окно расходов по работе, связанной с задачей."""
+        from managers.works_manager import WorksManager
+        from views.work_expenses_dialog import show_work_expenses_dialog
+
+        work_id = getattr(self.task, "work_id", None) if self.task else None
+        if not work_id:
+            messagebox.showinfo(
+                "Расходы",
+                "Для этой задачи не указана работа.",
+                parent=self.dialog
+            )
+            return
+
+        works_mgr = WorksManager()
+        work = works_mgr.get(work_id)
+        if work is None:
+            messagebox.showerror(
+                "Расходы",
+                "Работа не найдена в учёте.",
+                parent=self.dialog
+            )
+            return
+
+        self.dialog.grab_release()
+        try:
+            show_work_expenses_dialog(self.dialog, work, works_mgr)
+        finally:
+            try:
+                self.dialog.grab_set()
+            except tk.TclError:
+                pass
+
     def _open_client(self):
         """Переводит фокус к карточке клиента, сохраняя открытую форму задачи."""
         client_id = self.fixed_client_id

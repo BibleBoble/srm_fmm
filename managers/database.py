@@ -122,27 +122,29 @@ class Database:
         # Снижаем распространение к родительским логгерам
         logger.propagate = False
 
-        # Создаем директорию для логов если её нет
-        Path('logs').mkdir(exist_ok=True)
-        
-        # Файловый handler
-        fh = logging.FileHandler('logs/database.log', encoding='utf-8')
-        fh.setLevel(logging.INFO)
-        
-        # Консольный handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.WARNING)
-        
-        # Форматирование
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
-        fh.setFormatter(formatter)
+
+        # Консольный handler
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.WARNING)
         ch.setFormatter(formatter)
-        
-        logger.addHandler(fh)
+
+        # Файловый handler: если каталог логов недоступен, приложение
+        # продолжает работать и пишет только в консоль.
+        try:
+            Path('logs').mkdir(exist_ok=True)
+            fh = logging.FileHandler('logs/database.log', encoding='utf-8')
+            fh.setLevel(logging.INFO)
+            fh.setFormatter(formatter)
+            logger.addHandler(fh)
+        except OSError as error:
+            ch.setLevel(logging.INFO)
+            logger.warning('Не удалось открыть файл лога БД: %s', error)
+
         logger.addHandler(ch)
-        
+
         return logger
 
     def _connect(self) -> None:
@@ -225,6 +227,7 @@ class Database:
                 "responsible_person": "TEXT",
                 "partner_email": "TEXT",
                 "partner_phone": "TEXT",
+                "signature_position": "TEXT",
             }
             for column_name, column_type in partner_columns.items():
                 if column_name not in client_columns:
@@ -297,6 +300,58 @@ class Database:
                     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
                 )
             """)
+
+            # ============================================
+            # ТАБЛИЦА 5.1: РАБОТЫ (СДЕЛКИ) И РАСХОДЫ
+            # ============================================
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS works (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    client_id INTEGER NOT NULL,
+                    source_path TEXT UNIQUE,
+                    title TEXT NOT NULL,
+                    amount REAL DEFAULT 0,
+                    paid_amount REAL DEFAULT 0,
+                    paid_date DATE,
+                    status TEXT DEFAULT 'Запущена',
+                    start_date DATE,
+                    completed_date DATE,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS work_expenses (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    work_id INTEGER NOT NULL,
+                    date DATE,
+                    category TEXT,
+                    amount REAL DEFAULT 0,
+                    counterparty TEXT,
+                    comment TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE
+                )
+            """)
+            work_columns = {
+                row["name"] for row in cursor.execute("PRAGMA table_info(works)")
+            }
+            if "expert_id" not in work_columns:
+                cursor.execute("ALTER TABLE works ADD COLUMN expert_id INTEGER")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_works_client ON works(client_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_works_status ON works(status)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_works_expert ON works(expert_id)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_work_expenses_work "
+                "ON work_expenses(work_id)"
+            )
             
             # ============================================
             # ТАБЛИЦА 6: ЗАДАЧИ
@@ -310,11 +365,22 @@ class Database:
                     completed INTEGER DEFAULT 0,
                     status TEXT DEFAULT 'Новая',
                     priority TEXT DEFAULT 'Средний',
+                    is_financial INTEGER DEFAULT 0,
+                    work_id INTEGER,
                     client_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
                 )
             """)
+            task_columns = {
+                row["name"] for row in cursor.execute("PRAGMA table_info(tasks)")
+            }
+            if "is_financial" not in task_columns:
+                cursor.execute(
+                    "ALTER TABLE tasks ADD COLUMN is_financial INTEGER DEFAULT 0"
+                )
+            if "work_id" not in task_columns:
+                cursor.execute("ALTER TABLE tasks ADD COLUMN work_id INTEGER")
             
             # ============================================
             # ТАБЛИЦА 7: ЭКСПЕРТЫ

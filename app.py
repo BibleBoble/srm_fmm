@@ -18,7 +18,8 @@ from views.clients_view import ClientsView
 from views.experts_view import ExpertsView
 from views.tasks_view import TasksView
 from views.reports_view import ReportsView
-from views.mail_window import MailWindowController
+from views.mail_window import MailView
+from services.document_service import DocumentService
 
 
 class App:
@@ -47,10 +48,14 @@ class App:
         self.contact_emails_mgr = ContactEmailsManager()
         self.interactions_mgr = InteractionsManager()
 
+        # Фоновое формирование PDF: DOCX создаётся сразу, PDF — в процессе.
+        self.document_service = DocumentService(self.root)
+
         # Представления (создадим после создания content_frame)
         self.clients_view = None
         self.tasks_view = None
         self.reports_view = None
+        self.mail_view = None
 
         # Настройка окна
         self._setup_window()
@@ -60,22 +65,13 @@ class App:
         self._create_content_area()
         self._create_views()
 
+        # Встроенная Яндекс.Почта: процесс стартует сразу и остаётся
+        # загруженным, поэтому раздел открывается мгновенно.
+        self.mail_view = MailView(self.root, self.mail_frame, self.content_frame)
+        self.root.after(300, self.mail_view.preload)
+
         # Открываем основной рабочий раздел при запуске.
         self.show_tasks()
-
-        # Создаём окно почты и запускаем браузер при старте приложения (не отложенно).
-        self.mail_window_toplevel = tk.Toplevel(self.root)
-        self.mail_window_toplevel.title("Яндекс.Почта — SRM FMM")
-        self.mail_window_toplevel.geometry("1200x800")
-        self.mail_window_toplevel.minsize(800, 600)
-        self.mail_window_toplevel.protocol(
-            "WM_DELETE_WINDOW", self._hide_mail_window
-        )
-        self.mail_window_toplevel.withdraw()  # Скрываем сразу, не показываем
-        self.mail_window = MailWindowController(
-            self.root, self.mail_window_toplevel
-        )
-        self.root.after_idle(self.mail_window.show)
 
     def _setup_window(self):
         """Настройка главного окна в классическом стиле"""
@@ -204,47 +200,69 @@ class App:
                 )
 
     def _create_content_area(self):
-        """Создаёт область для контента основных разделов."""
+        """Создаёт область контента: обычные разделы и встроенную почту."""
         self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
 
         self.content_frame = tk.Frame(self.root, bg=Colors.LIGHT)
         self.content_frame.grid(row=1, column=0, sticky="nsew")
-        self.content_frame.tkraise()
+        self.content_frame.grid_rowconfigure(0, weight=1)
+        self.content_frame.grid_columnconfigure(0, weight=1)
 
-        # Отдельное окно для раздела «Почта» — создаётся при первом показе.
-        # Браузер запускается в своём процессе, не перерисовывает основное окно.
-        self.mail_window_toplevel = None
-        self.mail_window = None
+        # Контейнер обычных разделов: клиенты, задачи, эксперты, отчёты.
+        self.views_frame = tk.Frame(self.content_frame, bg=Colors.LIGHT)
+        self.views_frame.grid(row=0, column=0, sticky="nsew")
+
+        # Контейнер встроенного окна Яндекс.Почты. Окно браузера живёт
+        # в отдельном процессе и прикрепляется к этому фрейму.
+        self.mail_frame = tk.Frame(self.content_frame, bg=Colors.LIGHT)
+        self.mail_frame.grid(row=0, column=0, sticky="nsew")
+
+        self.views_frame.tkraise()
 
     def _create_views(self):
         """Создаёт все представления (но не отображает их)"""
         self.clients_view = ClientsView(
-            self.content_frame,
+            self.views_frame,
             self.clients_mgr,
             self.contact_persons_mgr,
             self.contact_emails_mgr,
             self.interactions_mgr,
-            self.tasks_mgr
+            self.tasks_mgr,
+            document_service=self.document_service
         )
 
-        self.experts_view = ExpertsView(self.content_frame, self.experts_mgr)
-        self.tasks_view = TasksView(self.content_frame, self.tasks_mgr, self.clients_mgr)
+        self.experts_view = ExpertsView(self.views_frame, self.experts_mgr)
+        self.tasks_view = TasksView(self.views_frame, self.tasks_mgr, self.clients_mgr)
         self.tasks_view.open_client_callback = self.clients_view._open_client_card_by_id
-        self.reports_view = ReportsView(self.content_frame)
+        self.reports_view = ReportsView(
+            self.views_frame,
+            self.clients_mgr,
+            self.tasks_mgr,
+            self.interactions_mgr
+        )
 
     def _on_exit(self):
-        """Обработчик выхода из приложения"""
+        """Обработчик выхода: окно скрывается сразу, почта гасится в фоне."""
         from tkinter import messagebox
-        if messagebox.askyesno("Выход", "Вы действительно хотите выйти?"):
-            if self.mail_window is not None:
-                self.mail_window.close()
-            # Закрываем соединение с БД
+        if not messagebox.askyesno("Выход", "Вы действительно хотите выйти?"):
+            return
+
+        # Мгновенно убираем окно — приложение не «зависает» на закрытии.
+        self.root.withdraw()
+
+        def finish():
+            # Закрываем соединение с БД и приложение.
             from managers.database import Database
-            db = Database()
-            db.close()
-            # Закрываем приложение
-            self.root.quit()
+            if self.document_service is not None:
+                self.document_service.close()
+            Database().close()
+            self.root.destroy()
+
+        if self.mail_view is not None:
+            self.mail_view.request_shutdown(on_done=finish)
+        else:
+            finish()
 
     # --- МЕТОДЫ НАВИГАЦИИ ---
 
@@ -277,28 +295,13 @@ class App:
         self.reports_view.show()
 
     def show_mail(self):
-        """Открывает Яндекс.Почту в отдельном окне Toplevel."""
+        """Показывает встроенную Яндекс.Почту в основном окне."""
         self._set_active_menu("Почта")
-        if self.mail_window_toplevel is None:
-            self.mail_window_toplevel = tk.Toplevel(self.root)
-            self.mail_window_toplevel.title("Яндекс.Почта — SRM FMM")
-            self.mail_window_toplevel.geometry("1200x800")
-            self.mail_window_toplevel.minsize(800, 600)
-            self.mail_window_toplevel.protocol(
-                "WM_DELETE_WINDOW", self._hide_mail_window
-            )
-            self.mail_window = MailWindowController(
-                self.root, self.mail_window_toplevel
-            )
-        self.mail_window_toplevel.deiconify()
-        self.mail_window_toplevel.lift()
-        self.mail_window.show()
-
-    def _hide_mail_window(self):
-        """Скрывает окно почты (не завершает процесс)."""
-        if self.mail_window_toplevel is not None:
-            self.mail_window_toplevel.withdraw()
+        self.mail_frame.tkraise()
+        self.mail_view.show()
 
     def _show_standard_content(self):
         """Переключается на контейнер стандартных разделов."""
-        self.content_frame.tkraise()
+        self.views_frame.tkraise()
+        if self.mail_view is not None:
+            self.mail_view.hide()

@@ -1,11 +1,19 @@
+"""Заполнение DOCX-шаблонов без Microsoft Word.
+
+Старые шаблоны DOC один раз конвертируются в DOCX (рядом с исходником или
+в кэш), после чего формирование документа не требует запуска Word.
+
+Документ рендерится один раз: результат хранится в памяти и записывается
+на диск при сохранении. PDF готовится отдельно и не блокирует интерфейс.
+"""
 import copy
 import hashlib
+import io
 import os
 import re
-import shutil
-import tempfile
 from pathlib import Path
 
+from docx import Document
 
 _WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _WORD_TAG = f"{{{_WORD_NAMESPACE}}}"
@@ -13,109 +21,85 @@ _HIGHLIGHT_TAG = f"{_WORD_TAG}highlight"
 _TEXT_TAG = f"{_WORD_TAG}t"
 _RUN_PROPERTIES_TAG = f"{_WORD_TAG}rPr"
 _YELLOW = "yellow"
+_PLACEHOLDER_PATTERN = re.compile(r"\[[^\]]+\]")
+
+# Кэш содержимого шаблонов: путь -> (размер, mtime, байты).
+_TEMPLATE_BYTES = {}
 
 
 class PythonDocumentGenerator:
-    """Заполняет DOCX-шаблоны Python-кодом и создаёт PDF через Word."""
+    """Заполняет DOCX-шаблон и сохраняет готовый документ."""
 
     def __init__(self, template_path, replacements, line_items=None, line_table_index=None):
         self.template_path = Path(template_path)
         if not self.template_path.is_file():
             raise FileNotFoundError(f"Не найден шаблон документа: {self.template_path}")
 
-        self.replacements = replacements
+        self.replacements = {
+            str(key): str(value) for key, value in replacements.items()
+        }
         self.line_items = line_items or []
         self.line_table_index = line_table_index
-        self._temporary_directory = Path(
-            tempfile.mkdtemp(prefix="srm-python-document-")
-        )
-        self._preview_path = self._temporary_directory / "preview.docx"
-        self._closed = False
-        self._word = None
-        self._preview_document = None
+        self._rendered = {}
 
-    def show_preview(self):
-        document = self._load_document()
-        self._populate_document(document, highlight=True)
-        document.save(self._preview_path)
-        self._word_application().Visible = True
-        self._preview_document = self._word_application().Documents.Open(
-            str(self._preview_path),
-            False,
-            True,
-            False
-        )
-        self._preview_document.Activate()
+    # --- публичный интерфейс ---
 
-    def save(self, docx_path, pdf_path):
-        docx_path = Path(docx_path)
-        pdf_path = Path(pdf_path)
-        if docx_path.exists() or pdf_path.exists():
-            raise FileExistsError("Документ с таким именем уже существует.")
+    def render(self, highlight=False):
+        """Заполнить шаблон один раз и вернуть байты DOCX.
 
-        try:
+        highlight=True подсвечивает автоматически вставленные значения
+        жёлтым — это используется для предпросмотра.
+        """
+        key = bool(highlight)
+        if key not in self._rendered:
             document = self._load_document()
-            self._populate_document(document, highlight=False)
-            document.save(docx_path)
-            self._close_preview()
-            word = self._word_application()
-            word.Visible = False
-            pdf_document = word.Documents.Open(
-                str(docx_path),
-                False,
-                True,
-                False
-            )
-            try:
-                pdf_document.ExportAsFixedFormat(str(pdf_path), 17)
-            finally:
-                pdf_document.Close(0)
-        except Exception:
-            docx_path.unlink(missing_ok=True)
-            pdf_path.unlink(missing_ok=True)
-            raise
+            self._populate_document(document, highlight=key)
+            buffer = io.BytesIO()
+            document.save(buffer)
+            self._rendered[key] = buffer.getvalue()
+        return self._rendered[key]
 
-        if not docx_path.is_file() or not pdf_path.is_file():
-            docx_path.unlink(missing_ok=True)
-            pdf_path.unlink(missing_ok=True)
-            raise OSError("Не удалось создать DOCX- и PDF-файлы.")
+    def save_docx(self, target_path):
+        """Записать готовый документ на диск, не перечитывая шаблон."""
+        target_path = Path(target_path)
+        data = self.render()
+        with target_path.open("xb") as output:
+            output.write(data)
 
     def close(self):
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self._close_preview()
-        finally:
-            try:
-                if self._word is not None:
-                    self._word.Quit()
-            finally:
-                shutil.rmtree(self._temporary_directory, ignore_errors=False)
+        """Совместимость: генератор не держит внешних ресурсов."""
+        return
+
+    # --- загрузка шаблона ---
 
     def _load_document(self):
-        try:
-            from docx import Document
-        except ImportError as error:
-            raise RuntimeError(
-                "Для генерации DOCX установите зависимость python-docx."
-            ) from error
-        return Document(self._docx_template_path())
+        data = _template_bytes(self._docx_template_path())
+        return Document(io.BytesIO(data))
 
     def _docx_template_path(self):
-        if self.template_path.suffix.casefold() == ".docx":
+        suffix = self.template_path.suffix.casefold()
+        if suffix == ".docx":
             return self.template_path
-        if self.template_path.suffix.casefold() != ".doc":
+        if suffix != ".doc":
             raise ValueError("Шаблон должен иметь формат DOC или DOCX.")
 
+        # Рядом с исходным DOC обычно лежит заранее сохранённый DOCX —
+        # это избавляет от запуска Word при каждом формировании.
+        sibling = self.template_path.with_suffix(".docx")
+        if sibling.is_file():
+            return sibling
+
+        return self._convert_legacy_template()
+
+    def _convert_legacy_template(self):
+        """Одноразовая конвертация DOC в DOCX, если рядом нет готового DOCX."""
         local_app_data = os.environ.get("LOCALAPPDATA")
         if not local_app_data:
             raise RuntimeError("В Windows не задан путь LOCALAPPDATA.")
 
         source = self.template_path.resolve()
-        signature = (
-            f"{source}|{source.stat().st_size}|{source.stat().st_mtime_ns}"
-        ).encode("utf-8")
+        stat = source.stat()
+        signature = f"{source}|{stat.st_size}|{stat.st_mtime_ns}".encode("utf-8")
         cache_key = hashlib.sha256(signature).hexdigest()
         cache_dir = Path(local_app_data) / "SRM FMM" / "template-cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -123,30 +107,26 @@ class PythonDocumentGenerator:
         if converted_path.is_file():
             return converted_path
 
-        self._convert_legacy_template(converted_path)
+        self._convert_with_word(converted_path)
         return converted_path
 
-    def _convert_legacy_template(self, converted_path):
+    def _convert_with_word(self, converted_path):
         if os.name != "nt":
             raise OSError("Конвертация шаблонов DOC поддерживается только в Windows.")
         try:
             import win32com.client
         except ImportError as error:
             raise RuntimeError(
-                "Для первого чтения шаблона DOC требуется Microsoft Word и pywin32."
+                "Для первого чтения шаблона DOC требуется Microsoft Word и pywin32. "
+                "Сохраните шаблон в формате DOCX рядом с исходным файлом."
             ) from error
 
-        word = self._word_application()
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
         document = None
         try:
-            word.Visible = False
-            word.DisplayAlerts = 0
-            document = word.Documents.Open(
-                str(self.template_path),
-                False,
-                True,
-                False
-            )
+            document = word.Documents.Open(str(self.template_path), False, True, False)
             document.SaveAs2(str(converted_path), 16)
         except Exception:
             converted_path.unlink(missing_ok=True)
@@ -154,59 +134,57 @@ class PythonDocumentGenerator:
         finally:
             if document is not None:
                 document.Close(0)
+            word.Quit()
 
         if not converted_path.is_file():
             raise OSError("Microsoft Word не создал кэш DOCX-шаблона.")
 
-    def _word_application(self):
-        if self._closed:
-            raise RuntimeError("Генератор документов уже закрыт.")
-        if self._word is None:
-            if os.name != "nt":
-                raise OSError("Создание PDF поддерживается только в Windows.")
-            try:
-                import win32com.client
-            except ImportError as error:
-                raise RuntimeError(
-                    "Для предпросмотра и экспорта PDF требуются Microsoft Word и pywin32."
-                ) from error
-            self._word = win32com.client.DispatchEx("Word.Application")
-            self._word.Visible = False
-            self._word.DisplayAlerts = 0
-        return self._word
-
-    def _close_preview(self):
-        if self._preview_document is not None:
-            self._preview_document.Close(0)
-            self._preview_document = None
+    # --- заполнение ---
 
     def _populate_document(self, document, highlight):
-        for paragraph in _iter_paragraphs(document):
-            for placeholder, value in sorted(
-                self.replacements.items(),
-                key=lambda item: len(item[0]),
-                reverse=True
-            ):
-                _replace_paragraph_text(
-                    paragraph,
-                    placeholder,
-                    str(value),
-                    highlight
-                )
+        pattern = self._replacement_pattern()
+
+        if pattern is not None:
+            for paragraph in _iter_paragraphs(document):
+                runs = _paragraph_runs(paragraph)
+                full_text = "".join(run.text for run in runs)
+                matches = list(pattern.finditer(full_text))
+                if not matches:
+                    continue
+
+                # Идём справа налево: замена не сдвигает позиции левых вхождений.
+                for match in reversed(matches):
+                    _replace_run_span(
+                        paragraph,
+                        _paragraph_runs(paragraph),
+                        match.start(),
+                        match.end(),
+                        self.replacements[match.group(0)],
+                        highlight,
+                    )
 
         if self.line_table_index is not None:
             self._populate_line_table(document, highlight)
 
-        unresolved_fields = {
-            value
+        # Проверяем остатки только после заполнения таблицы услуг: шаблонная
+        # строка таблицы содержит служебные плейсхолдеры, которые затираются.
+        unresolved = {
+            placeholder
             for paragraph in _iter_paragraphs(document)
-            for value in re.findall(r"\[[^\]]+\]", paragraph.text)
+            for placeholder in _PLACEHOLDER_PATTERN.findall(paragraph.text)
         }
-        if unresolved_fields:
+        if unresolved:
             raise ValueError(
                 "В шаблоне остались незаполненные поля: "
-                + ", ".join(sorted(unresolved_fields))
+                + ", ".join(sorted(unresolved))
             )
+
+    def _replacement_pattern(self):
+        """Один regex из всех известных плейсхолдеров, длинные — первыми."""
+        keys = sorted(self.replacements, key=len, reverse=True)
+        if not keys:
+            return None
+        return re.compile("|".join(re.escape(key) for key in keys))
 
     def _populate_line_table(self, document, highlight):
         table_index = self.line_table_index - 1
@@ -244,6 +222,23 @@ class PythonDocumentGenerator:
                 for paragraph in cell.paragraphs[1:]:
                     _set_paragraph_text(paragraph, "", False)
 
+
+def _template_bytes(path):
+    """Прочитать шаблон один раз и держать его байты в памяти."""
+    path = Path(path)
+    stat = path.stat()
+    key = str(path.resolve())
+    cached = _TEMPLATE_BYTES.get(key)
+    if cached is not None:
+        size, mtime_ns, data = cached
+        if size == stat.st_size and mtime_ns == stat.st_mtime_ns:
+            return data
+
+    data = path.read_bytes()
+    _TEMPLATE_BYTES[key] = (stat.st_size, stat.st_mtime_ns, data)
+    return data
+
+
 def _iter_paragraphs(document):
     seen = set()
 
@@ -269,18 +264,6 @@ def _iter_paragraphs(document):
             section.even_page_footer
         ):
             yield from collect(container)
-
-
-def _replace_paragraph_text(paragraph, placeholder, replacement, highlight):
-    if not placeholder:
-        return
-    while True:
-        runs = _paragraph_runs(paragraph)
-        full_text = "".join(run.text for run in runs)
-        start = full_text.find(placeholder)
-        if start < 0:
-            return
-        _replace_run_span(paragraph, runs, start, start + len(placeholder), replacement, highlight)
 
 
 def _paragraph_runs(paragraph):

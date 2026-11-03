@@ -10,7 +10,8 @@ class Task:
     """
 
     def __init__(self, id=None, title="", description="", due_date=None,
-                 completed=False, client_id=None, created_at=None, priority=None):
+                 completed=False, client_id=None, created_at=None, priority=None,
+                 is_financial=False, work_id=None):
         self.id = id
         self.title = title
         self.description = description
@@ -18,7 +19,9 @@ class Task:
         self.completed = completed
         self.client_id = client_id
         self.created_at = created_at or datetime.now()
-        self.priority = priority  # ← ДОБАВЬТЕ ЭТО
+        self.priority = priority
+        self.is_financial = bool(is_financial)
+        self.work_id = work_id
 
     def __repr__(self):
         """Строковое представление объекта для отладки"""
@@ -46,7 +49,9 @@ class Task:
             'client_id': self.client_id,
             'created_at': self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
             'priority': self.priority,
-            'status': self.status  # ← ДОБАВЬТЕ status в словарь
+            'is_financial': 1 if self.is_financial else 0,
+            'work_id': self.work_id,
+            'status': self.status
         }
 
     @staticmethod
@@ -86,7 +91,9 @@ class Task:
             completed=bool(data.get('completed', 0)),
             client_id=data.get('client_id'),
             created_at=created_at,
-            priority=data.get('priority')  # ← ИСПРАВЬТЕ: было None
+            priority=data.get('priority'),
+            is_financial=bool(data.get('is_financial', 0)),
+            work_id=data.get('work_id')
         )
 
     def is_valid(self):
